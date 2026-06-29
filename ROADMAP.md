@@ -12,9 +12,10 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 2 — Persistenz-Layer (SQLite-Repository).**
-Datenmodell ist da; jetzt eine testbare Speicher-Schicht, die die Kernfrage
-„was ist offen / bei wem muss ich mich melden?" beantworten kann.
+**Schritt 3 — Markdown-Verlaufslogs pro Projekt.**
+Modul `kollege/logs/`: pro Projekt eine Markdown-Datei (Verlauf/Notizen),
+append-only, menschenlesbar. Pfad in `Project.markdown_log_path` ablegen.
+TDD gegen `tmp_path`.
 
 ---
 
@@ -24,8 +25,8 @@ Datenmodell ist da; jetzt eine testbare Speicher-Schicht, die die Kernfrage
 |---|---|---|---|
 | 0 | Projekt-Scaffolding (uv, CI, Tooling, Doku) | 0 | ✅ erledigt |
 | 1 | Datenmodell (Pydantic) | 0 | ✅ erledigt |
-| 2 | Persistenz-Layer (SQLite-Repository) | 1 | ⏳ als Nächstes |
-| 3 | Markdown-Verlaufslogs pro Projekt | 1 | ⬜ offen |
+| 2 | Persistenz-Layer (SQLite-Repository) | 1 | ✅ erledigt |
+| 3 | Markdown-Verlaufslogs pro Projekt | 1 | ⏳ als Nächstes |
 | 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ⬜ offen |
 | 5 | Transkriptions-Backend wählen & implementieren | 1 | ⬜ offen |
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ⬜ offen |
@@ -65,7 +66,7 @@ Domänen-Entitäten (`Contact`, `Project`, `Task`).
 *Ziel der Phase: Sie spricht eine Notiz ein und bekommt strukturierte,
 bestätigte Aufgaben/Kontakte zurück. Läuft komplett lokal auf dem Air.*
 
-### Schritt 2 — Persistenz-Layer (SQLite) ⏳
+### Schritt 2 — Persistenz-Layer (SQLite) ✅
 Modul `kollege/db/`: Schema-Erzeugung aus den Modellen + Repository.
 - Funktionen: `upsert_contact`, `create_task`, `update_project`,
   `query_open_items`, `query_waiting_on`.
