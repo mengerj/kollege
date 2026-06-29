@@ -1085,6 +1085,10 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
+signal = [
+    { name = "httpx" },
+    { name = "websockets" },
+]
 transcription = [
     { name = "faster-whisper" },
 ]
@@ -1103,6 +1107,10 @@ dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff", specifier = ">=0.6" },
+]
+signal = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "websockets", specifier = ">=13.0" },
 ]
 transcription = [{ name = "faster-whisper", specifier = ">=1.0" }]
 

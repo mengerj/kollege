@@ -1,0 +1,13 @@
+services:
+  signal-cli-rest-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    environment:
+      # JSON-RPC-Modus aktiviert WebSocket-Streaming (erforderlich für SignalChannel).
+      - MODE=json-rpc
+    ports:
+      - "8080:8080"
+    volumes:
+      # Signal-CLI-Konfiguration (Schlüssel, Registrierung) wird hier dauerhaft gespeichert.
+      # Sicherung dieses Verzeichnisses = Sicherung der Signal-Identität.
+      - ./signal-cli-config:/home/.local/share/signal-cli
+    restart: unless-stopped

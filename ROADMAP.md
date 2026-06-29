@@ -12,12 +12,14 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 6 — Signal-Kanal-Adapter (signal-cli-rest-api).**
-`signal-cli-rest-api` (Docker) als Linked Device anbinden; `Channel`-Protocol
-implementieren (Empfang via WebSocket/JSON-RPC, Senden via POST, Medien beidseitig).
-- `docker-compose.yml` für den Container; Linking-Anleitung dokumentieren.
-- **Test:** Adapter-Logik gegen gemockte HTTP/WS-Antworten; echter Container nur manuell/integration.
-**DoD:** Text + Sprachnachricht empfangen und Antwort senden gegen lokalen Container.
+**Schritt 7 — Orchestrator + Bestätigungs-Loop.**
+`kollege/orchestrator.py`: verdrahtet Channel → (Audio→Transcriber) → Agent →
+Repository/Logs → Bestätigungsfrage zurück.
+- **Bestätigungs-UX:** Emoji-Reaktion (👍) als Standard, nummerierte Auswahl
+  bei mehreren Optionen. Erfordert Pending-State (Vorschlag ↔ `message_id`) und
+  Verarbeitung eingehender Reaktionen.
+- Async-Architektur (Listener-Dauerprozess) festlegen.
+**DoD:** Vorschlag → Nutzerbestätigung → erst dann Persistenz; abgelehnt → verworfen.
 
 ---
 
@@ -31,8 +33,8 @@ implementieren (Empfang via WebSocket/JSON-RPC, Senden via POST, Medien beidseit
 | 3 | Markdown-Verlaufslogs pro Projekt | 1 | ✅ erledigt |
 | 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ✅ erledigt |
 | 5 | Transkriptions-Backend wählen & implementieren | 1 | ✅ erledigt |
-| 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ⏳ als Nächstes |
-| 7 | Orchestrator + Bestätigungs-Loop | 1 | ⬜ offen |
+| 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ✅ erledigt |
+| 7 | Orchestrator + Bestätigungs-Loop | 1 | ⏳ als Nächstes |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | ⬜ offen |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -112,13 +114,13 @@ mit Metal). Modell `medium` für Eigen-/Ortsnamen.
   Standard-CI-Lauf).
 **DoD:** OGG/Opus-Sprachnachricht → Text, hinter dem Protocol austauschbar.
 
-### Schritt 6 — Signal-Kanal-Adapter ⬜
+### Schritt 6 — Signal-Kanal-Adapter ✅
 `signal-cli-rest-api` (Docker) als Linked Device anbinden; `Channel`-Protocol
-implementieren (Empfang via WebSocket/JSON-RPC, Senden via POST, Medien beidseitig).
-- `docker-compose.yml` für den Container; Linking-Anleitung dokumentieren.
-- **Test:** Adapter-Logik gegen gemockte HTTP/WS-Antworten; echter Container nur
-  manuell/integration.
-**DoD:** Text + Sprachnachricht empfangen und Antwort senden gegen lokalen Container.
+implementiert (Empfang via WebSocket, Senden via POST, Audio-Download).
+- `docker-compose.yml` + `docs/signal-setup.md` (Linking-Anleitung).
+- Lazy-Imports `httpx` + `websockets` in optionaler Dep-Gruppe `signal`.
+- **Test:** 14 Tests gegen Mocks; echter Container nur manuell.
+**DoD:** ✅ Text + Sprachnachricht empfangen und Antwort senden (gegen Mocks); 83 Tests grün.
 
 ### Schritt 7 — Orchestrator + Bestätigungs-Loop ⬜
 `kollege/orchestrator.py`: verdrahtet Channel → (Audio→Transcriber) → Agent →
