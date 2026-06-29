@@ -1,6 +1,21 @@
 """Persistenz-Layer (SQLite).
 
-Implementierung folgt in Schritt 2 der Roadmap: Schema-Erzeugung und ein
-Repository mit ``upsert_contact`` / ``create_task`` / ``update_project_status``
-/ ``query_open_items``. Quelle der Wahrheit für "was ist offen?".
+Öffentliche API: ``Repository`` und ``open_repository``.
 """
+
+from __future__ import annotations
+
+import sqlite3
+
+from kollege.db.repository import Repository
+
+__all__ = ["Repository", "open_repository"]
+
+
+def open_repository(db_path: str) -> Repository:
+    """Datenbankverbindung öffnen und Repository zurückgeben.
+
+    Erstellt die Datei und das Schema falls nicht vorhanden.
+    """
+    conn = sqlite3.connect(db_path)
+    return Repository(conn)
