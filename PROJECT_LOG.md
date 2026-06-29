@@ -5,6 +5,36 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-29 — Transkriptions-Backend faster-whisper (Schritt 5)
+
+**Getan:**
+- [`src/kollege/transcription/faster_whisper.py`](src/kollege/transcription/faster_whisper.py):
+  `FasterWhisperTranscriber` implementiert das `Transcriber`-Protocol vollständig.
+  Lazy-Loading des Modells (erster `transcribe()`-Aufruf), `language="de"`, `beam_size=5`.
+- [`pyproject.toml`](pyproject.toml): optionale Dependency-Gruppe `transcription`
+  (`faster-whisper>=1.0`); mypy-Override `ignore_missing_imports = true` für
+  das optionale Paket; pytest-Marker `slow` registriert.
+- [`tests/test_transcription.py`](tests/test_transcription.py): 5 neue Tests:
+  Protocol-Konformität, `FileNotFoundError`, ImportError-Meldung (mock), Modell-Aufruf
+  (mock), Segmente zusammenfügen (mock). Slow-Integration-Test mit `@pytest.mark.slow`
+  (echter Whisper-Lauf auf Stille-WAV, `tiny`-Modell).
+- CI-Kette (ruff/mypy-strict/pytest) grün; 69 Tests bestehen, 1 slow deselected.
+
+**Entscheidungen:**
+- Lazy Import in `_load_model()`: verhindert `ImportError` beim Importieren des Moduls
+  wenn `faster-whisper` nicht installiert ist; Fehlermeldung enthält `uv sync --group`.
+- `_model: Any` — für optionale Drittbibliothek ohne Stubs akzeptabel.
+- Modell-Attribut intern (kein Property) — direkte Mock-Injektion in Tests ohne Patch.
+- `language="de"` fest: Projekt ist nur in Deutsch, spart Auto-Detection-Overhead.
+- OGG/Opus-Unterstützung erfordert ffmpeg; auf dem Entwicklungsrechner noch nicht
+  installiert — WAV-Format für Tests reicht; Produktionseinsatz braucht ffmpeg.
+
+**Offene Punkte / für später:**
+- ffmpeg installieren wenn Signal-OGG-Nachrichten verarbeitet werden (Schritt 6/8).
+- Echter Smoke-Test mit `tiny`-Modell und deutschsprachiger Audio-Fixture.
+
+---
+
 ## 2026-06-29 — Pydantic-AI-Agent + Tools (Schritt 4)
 
 **Getan:**

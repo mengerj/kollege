@@ -12,11 +12,12 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 5 — Transkriptions-Backend (faster-whisper).**
-Echtes Backend hinter dem bestehenden `Transcriber`-Protocol implementieren.
-Default-Empfehlung: `faster-whisper` (rein Python, Metal-Beschleunigung auf M-Chips).
-Modell `medium` für Eigen-/Ortsnamen. Optionale Dependency-Gruppe in `pyproject.toml`.
-Test mit kurzer Fixture-Audiodatei (markiert `slow`, nicht im Standard-CI-Lauf).
+**Schritt 6 — Signal-Kanal-Adapter (signal-cli-rest-api).**
+`signal-cli-rest-api` (Docker) als Linked Device anbinden; `Channel`-Protocol
+implementieren (Empfang via WebSocket/JSON-RPC, Senden via POST, Medien beidseitig).
+- `docker-compose.yml` für den Container; Linking-Anleitung dokumentieren.
+- **Test:** Adapter-Logik gegen gemockte HTTP/WS-Antworten; echter Container nur manuell/integration.
+**DoD:** Text + Sprachnachricht empfangen und Antwort senden gegen lokalen Container.
 
 ---
 
@@ -29,8 +30,8 @@ Test mit kurzer Fixture-Audiodatei (markiert `slow`, nicht im Standard-CI-Lauf).
 | 2 | Persistenz-Layer (SQLite-Repository) | 1 | ✅ erledigt |
 | 3 | Markdown-Verlaufslogs pro Projekt | 1 | ✅ erledigt |
 | 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ✅ erledigt |
-| 5 | Transkriptions-Backend wählen & implementieren | 1 | ⏳ als Nächstes |
-| 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ⬜ offen |
+| 5 | Transkriptions-Backend wählen & implementieren | 1 | ✅ erledigt |
+| 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ⏳ als Nächstes |
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ⬜ offen |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | ⬜ offen |
@@ -102,7 +103,7 @@ auf dem Repository. Provider modell-agnostisch via [`config.py`](src/kollege/con
 **DoD:** Agent extrahiert auf Fixtures plausibel; Tool-Aufrufe schreiben in DB;
 CI ohne Netz/LLM grün.
 
-### Schritt 5 — Transkriptions-Backend ⬜
+### Schritt 5 — Transkriptions-Backend ✅
 Echtes Backend hinter dem bestehenden `Transcriber`-Protocol wählen und bauen
 (Default-Empfehlung: `faster-whisper`, rein Python; Alternative `whisper.cpp`
 mit Metal). Modell `medium` für Eigen-/Ortsnamen.
