@@ -12,11 +12,11 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 4 — Pydantic-AI-Agent + Tools (Ollama).**
-Modul `kollege/agent/`: Agent mit `output_type=ExtractionResult`, Tools
-(`upsert_contact`, `create_task`, `update_project_status`, `query_open_items`)
-auf dem Repository. Provider modell-agnostisch via `config.py`.
-TDD mit `TestModel`/`FunctionModel` (kein echter LLM im CI).
+**Schritt 5 — Transkriptions-Backend (faster-whisper).**
+Echtes Backend hinter dem bestehenden `Transcriber`-Protocol implementieren.
+Default-Empfehlung: `faster-whisper` (rein Python, Metal-Beschleunigung auf M-Chips).
+Modell `medium` für Eigen-/Ortsnamen. Optionale Dependency-Gruppe in `pyproject.toml`.
+Test mit kurzer Fixture-Audiodatei (markiert `slow`, nicht im Standard-CI-Lauf).
 
 ---
 
@@ -28,8 +28,8 @@ TDD mit `TestModel`/`FunctionModel` (kein echter LLM im CI).
 | 1 | Datenmodell (Pydantic) | 0 | ✅ erledigt |
 | 2 | Persistenz-Layer (SQLite-Repository) | 1 | ✅ erledigt |
 | 3 | Markdown-Verlaufslogs pro Projekt | 1 | ✅ erledigt |
-| 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ⏳ als Nächstes |
-| 5 | Transkriptions-Backend wählen & implementieren | 1 | ⬜ offen |
+| 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ✅ erledigt |
+| 5 | Transkriptions-Backend wählen & implementieren | 1 | ⏳ als Nächstes |
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ⬜ offen |
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ⬜ offen |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ⬜ offen |
@@ -86,7 +86,7 @@ append-only, menschenlesbar, später als Agenten-Kontext nutzbar.
 - **TDD:** gegen `tmp_path`.
 **DoD:** ✅ Anlegen/Anhängen getestet, Pfadverwaltung robust. 18 Tests grün.
 
-### Schritt 4 — Pydantic-AI-Agent + Tools ⬜
+### Schritt 4 — Pydantic-AI-Agent + Tools ✅
 Modul `kollege/agent/`: Agent mit `output_type=ExtractionResult`, Tools
 (`upsert_contact`, `create_task`, `update_project_status`, `query_open_items`)
 auf dem Repository. Provider modell-agnostisch via [`config.py`](src/kollege/config.py).
