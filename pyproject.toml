@@ -54,7 +54,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m 'not slow'"
 markers = [
     "slow: marks tests as slow, require faster-whisper installed (deselect with '-m \"not slow\"')",
 ]
