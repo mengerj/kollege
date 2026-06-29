@@ -5,6 +5,36 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-29 — Markdown-Verlaufslogs (Schritt 3)
+
+**Getan:**
+- [`src/kollege/logs/__init__.py`](src/kollege/logs/__init__.py): Modul `kollege/logs/`
+  mit `ProjectLog`-Klasse und `open_project_log`-Factory.
+- `ProjectLog.append_entry(text, source=None)` — UTC-Zeitstempel-Überschrift, append-only
+  via `open("a")`.
+- `ProjectLog.read_recent(n=5)` — letzte *n* Einträge für künftigen Agenten-Kontext.
+- `open_project_log(project, log_dir)` — erstellt Verzeichnis + Datei (idempotent),
+  setzt `project.markdown_log_path`.
+- [`tests/test_logs.py`](tests/test_logs.py): 18 neue Tests gegen `tmp_path`, alle grün.
+- 51 Tests gesamt; ruff + mypy-strict + pytest grün.
+
+**Entscheidungen:**
+- Dateiname: `<slug>-<id>.md` wenn ID vorhanden, sonst `<slug>.md`.
+  Slug: Kleinbuchstaben, Sonderzeichen (`&`, `.`, …) entfernt, Leerzeichen → `-`.
+- Header wird nur beim ersten Anlegen geschrieben (idempotent-Check via `path.exists()`).
+- `markdown_log_path` wird am Projekt-Objekt in-place gesetzt; Aufrufer persistiert via
+  `Repository.update_project` — saubere Trennung Logs ↔ DB.
+- `read_recent` splittet auf `## YYYY-` Regex; erster Abschnitt = Header, Rest = Einträge.
+
+**Offene Punkte / für später:**
+- Integration `open_project_log` in Orchestrator (Schritt 7): automatisch aufrufen,
+  wenn ein Projekt erstmals angelegt wird.
+- Aufbewahrungsfrist / Archivierung langer Logs (Phase 3 / DSGVO, Schritt 17).
+
+**Nächster Schritt:** Schritt 4 — Pydantic-AI-Agent + Tools (Ollama).
+
+---
+
 ## 2026-06-29 — Persistenz-Layer (Schritt 2)
 
 **Getan:**

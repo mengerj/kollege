@@ -58,6 +58,18 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pyt
 
 - `uv run pre-commit install` einmalig; Hooks laufen dann automatisch.
 
+## Git-Workflow (obligatorisch)
+
+Jede Session arbeitet auf einem **Feature-Branch**, nie direkt auf `main`:
+
+1. Zu Beginn: `git checkout -b feat/<kurzname>` (z. B. `feat/schritt-3-markdown-logs`).
+2. Am Ende: Branch pushen und einen **Pull Request gegen `main`** öffnen:
+   ```bash
+   git push -u origin feat/<kurzname>
+   gh pr create --base main --title "..." --body "..."
+   ```
+3. Merge erst wenn CI grün und PR reviewed (auch im Solo-Projekt als Doku-Artefakt).
+
 ## Ritual am Ende JEDER Session (wichtig)
 
 1. **[PROJECT_LOG.md](PROJECT_LOG.md)** ergänzen: Datum, was getan, Entscheidungen,
@@ -65,7 +77,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pyt
 2. **[ROADMAP.md](ROADMAP.md)** aktualisieren: Status-Tabelle + Abschnitt
    **„▶ NÄCHSTER SCHRITT"** auf den nächsten konkreten Schritt setzen.
 3. Sicherstellen, dass die CI-Kette grün ist.
-4. Commit mit aussagekräftiger Nachricht (was + warum). Pushen nur auf Wunsch.
+4. Commit auf Feature-Branch, PR öffnen (siehe Git-Workflow oben).
 
 ## Grenzen & bewusste Auslassungen
 
