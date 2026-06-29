@@ -12,10 +12,11 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 3 — Markdown-Verlaufslogs pro Projekt.**
-Modul `kollege/logs/`: pro Projekt eine Markdown-Datei (Verlauf/Notizen),
-append-only, menschenlesbar. Pfad in `Project.markdown_log_path` ablegen.
-TDD gegen `tmp_path`.
+**Schritt 4 — Pydantic-AI-Agent + Tools (Ollama).**
+Modul `kollege/agent/`: Agent mit `output_type=ExtractionResult`, Tools
+(`upsert_contact`, `create_task`, `update_project_status`, `query_open_items`)
+auf dem Repository. Provider modell-agnostisch via `config.py`.
+TDD mit `TestModel`/`FunctionModel` (kein echter LLM im CI).
 
 ---
 
@@ -26,8 +27,8 @@ TDD gegen `tmp_path`.
 | 0 | Projekt-Scaffolding (uv, CI, Tooling, Doku) | 0 | ✅ erledigt |
 | 1 | Datenmodell (Pydantic) | 0 | ✅ erledigt |
 | 2 | Persistenz-Layer (SQLite-Repository) | 1 | ✅ erledigt |
-| 3 | Markdown-Verlaufslogs pro Projekt | 1 | ⏳ als Nächstes |
-| 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ⬜ offen |
+| 3 | Markdown-Verlaufslogs pro Projekt | 1 | ✅ erledigt |
+| 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ⏳ als Nächstes |
 | 5 | Transkriptions-Backend wählen & implementieren | 1 | ⬜ offen |
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ⬜ offen |
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ⬜ offen |
@@ -78,12 +79,12 @@ Modul `kollege/db/`: Schema-Erzeugung aus den Modellen + Repository.
 - **TDD:** Repository gegen In-Memory-SQLite (`:memory:`) vollständig testbar.
 **DoD:** Repository mit Tests, Round-Trip Modell↔DB, mypy/ruff/pytest grün.
 
-### Schritt 3 — Markdown-Verlaufslogs ⬜
+### Schritt 3 — Markdown-Verlaufslogs ✅
 Modul `kollege/logs/`: pro Projekt eine Markdown-Datei (Verlauf/Notizen),
 append-only, menschenlesbar, später als Agenten-Kontext nutzbar.
 - Pfad in `Project.markdown_log_path` ablegen.
 - **TDD:** gegen `tmp_path`.
-**DoD:** Anlegen/Anhängen getestet, Pfadverwaltung robust.
+**DoD:** ✅ Anlegen/Anhängen getestet, Pfadverwaltung robust. 18 Tests grün.
 
 ### Schritt 4 — Pydantic-AI-Agent + Tools ⬜
 Modul `kollege/agent/`: Agent mit `output_type=ExtractionResult`, Tools
