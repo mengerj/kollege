@@ -5,6 +5,43 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-29 — Pydantic-AI-Agent + Tools (Schritt 4)
+
+**Getan:**
+- [`src/kollege/agent/__init__.py`](src/kollege/agent/__init__.py): Modul `kollege/agent/` vollständig
+  implementiert.
+- Modul-Level-Agent `Agent[Repository, ExtractionResult]` mit `defer_model_check=True`
+  (Modell erst beim `run()`-Aufruf, ermöglicht Tests ohne LLM).
+- Vier Tools: `upsert_contact`, `create_task`, `update_project_status`, `query_open_items`.
+  Ungültige Enum-Werte werden mit `contextlib.suppress` toleriert (kein Crash).
+- `build_model(settings)` — erzeugt OllamaModel, AnthropicModel oder OpenAIChatModel
+  aus Config (lokal-first Default: Ollama).
+- `run_extraction(transcript, repo, settings)` — synchroner Produktions-Einstiegspunkt.
+- [`src/kollege/db/__init__.py`](src/kollege/db/__init__.py): `open_repository` mit
+  `check_same_thread=False` — pydantic-ai führt sync Tools in ThreadPoolExecutor aus.
+- [`tests/test_agent.py`](tests/test_agent.py): 13 neue Tests (gesamt 64), alle grün.
+  ruff + mypy-strict + pytest grün.
+
+**Entscheidungen:**
+- `defer_model_check=True` am Agent: kein Modell-Zwang bei Konstruktion; Modell wird
+  per `run(model=...)` übergeben — ermöglicht TestModel/FunctionModel im CI ohne LLM.
+- Tool-Output-Mode: pydantic-ai nutzt intern `final_result`-Tool für strukturierten Output
+  (kein Text-Modus). FunctionModel in Tests muss entsprechend antworten.
+- `check_same_thread=False` an SQLite-Connection: pydantic-ai's ThreadPoolExecutor führt
+  sync Tools in Worker-Threads aus — ohne dieses Flag crasht die DB.
+- Enum-Toleranz in Tools: ungültige Werte (LLM-Fehler) werden mit `contextlib.suppress`
+  ignoriert statt zu crashen; kein Retry-Loop im MVP.
+- ModelMessage/ModelResponse aus `pydantic_ai.messages` importieren (nicht aus `models`).
+
+**Offene Punkte / für später:**
+- Echter Smoke-Test mit Ollama `qwen2.5:7b-instruct` lokal (braucht laufenden Ollama-Server).
+- `run_extraction` ist synchron; für Orchestrator (Schritt 7) async-Variante bauen.
+- Eval-Set erweitern wenn echter LLM getestet wird (Schritt 8).
+
+**Nächster Schritt:** Schritt 5 — Transkriptions-Backend (faster-whisper).
+
+---
+
 ## 2026-06-29 — Markdown-Verlaufslogs (Schritt 3)
 
 **Getan:**
