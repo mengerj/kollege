@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import sqlite3
 
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.ollama import OllamaModel
@@ -23,6 +25,8 @@ from kollege.db.repository import Repository
 from kollege.models import (
     ContactType,
     ExtractedContact,
+    ExtractedProjectUpdate,
+    ExtractedTask,
     ExtractionResult,
     ProjectStatus,
     Task,
@@ -183,6 +187,62 @@ def build_model(settings: Settings) -> Model:
     return OpenAIChatModel(settings.llm_model, provider=OpenAIProvider())
 
 
+def _rebuild_from_repo(repo: Repository, clarification: str | None = None) -> ExtractionResult:
+    """Rekonstruiert ExtractionResult aus dem DB-Zustand eines frischen Temp-Repos.
+
+    Verwendet für den Fallback-Pfad, wenn das Modell kein ``final_result``-Tool
+    aufruft (z. B. kleinere Ollama-Modelle). Die Kontakte, Tasks und Projekte
+    wurden bereits via Tools in ``repo`` gespeichert.
+    """
+    all_contacts = repo.get_all_contacts()
+    all_projects = repo.get_all_projects()
+    open_tasks = repo.query_open_items()
+
+    project_by_id = {p.id: p for p in all_projects if p.id is not None}
+    contact_by_id = {c.id: c for c in all_contacts if c.id is not None}
+
+    extracted_contacts = [
+        ExtractedContact(
+            name=c.name,
+            type=c.type,
+            email=c.email,
+            phone=c.phone,
+            notes=c.notes,
+        )
+        for c in all_contacts
+    ]
+
+    extracted_tasks = [
+        ExtractedTask(
+            title=t.title,
+            contact=contact_by_id[t.contact_id].name if t.contact_id in contact_by_id else None,
+            project=project_by_id[t.project_id].title if t.project_id in project_by_id else None,
+            due=t.due,
+            time_window=t.time_window,
+        )
+        for t in open_tasks
+    ]
+
+    extracted_updates = [
+        ExtractedProjectUpdate(
+            project=p.title,
+            status=p.status if p.status != ProjectStatus.ANFRAGE else None,
+            phase_note=p.phase_note,
+            next_action=p.next_action,
+            waiting_on=p.waiting_on,
+        )
+        for p in all_projects
+        if p.status != ProjectStatus.ANFRAGE or p.phase_note or p.next_action or p.waiting_on
+    ]
+
+    return ExtractionResult(
+        contacts=extracted_contacts,
+        tasks=extracted_tasks,
+        project_updates=extracted_updates,
+        clarification=clarification,
+    )
+
+
 def run_extraction(
     transcript: str,
     repo: Repository,
@@ -190,8 +250,30 @@ def run_extraction(
 ) -> ExtractionResult:
     """Extraktion aus Transkript synchron ausführen (Produktions-Pfad).
 
-    Für asynchronen Einsatz direkt ``agent.run()`` nutzen.
+    Primär-Pfad: Modell gibt ``ExtractionResult`` via ``final_result``-Tool zurück.
+    Fallback: Modell speichert via Domain-Tools in ``repo``, ExtractionResult wird
+    aus dem DB-Zustand rekonstruiert (für kleinere lokale Modelle wie qwen2.5:7b).
     """
     model = build_model(settings)
-    result = agent.run_sync(transcript, model=model, deps=repo)
-    return result.output
+
+    # Primär-Pfad: Tool-Output-Modus (ExtractionResult als final_result-Tool).
+    # Wird von TestModel/FunctionModel im CI genutzt und von starken Modellen.
+    try:
+        result = agent.run_sync(transcript, model=model, deps=repo, retries=1)
+        return result.output
+    except (UnexpectedModelBehavior, sqlite3.DatabaseError):
+        pass
+
+    # Fallback: Modell ruft Domain-Tools auf, aber kein final_result-Tool.
+    # Frische Verbindung vermeidet Doppelschreibungen aus dem Primär-Lauf.
+    fallback_conn = sqlite3.connect(":memory:", check_same_thread=False)
+    fallback_repo = Repository(fallback_conn)
+    text_result = agent.run_sync(
+        transcript, model=model, deps=fallback_repo, output_type=str, retries=3
+    )
+    text_output: str = text_result.output
+    # Wenn nichts gespeichert wurde, könnte es eine Rückfrage sein.
+    clarification: str | None = None
+    if not fallback_repo.get_all_contacts() and not fallback_repo.query_open_items():
+        clarification = text_output.strip() if text_output else None
+    return _rebuild_from_repo(fallback_repo, clarification=clarification)
