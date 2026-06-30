@@ -24,6 +24,37 @@ ACCOUNT = "+49123456789"
 # --------------------------------------------------------------------------- #
 
 
+def _note_to_self_quote_reply(
+    text: str,
+    target_ts: int,
+    ts: int = 1_718_000_000_010,
+) -> dict[str, object]:
+    """Note-to-Self-Textnachricht als Quote-Reply (Zitat-Antwort auf eine eigene Nachricht)."""
+    return {
+        "envelope": {
+            "source": ACCOUNT,
+            "sourceNumber": ACCOUNT,
+            "sourceDevice": 1,
+            "timestamp": ts,
+            "syncMessage": {
+                "sentMessage": {
+                    "destination": ACCOUNT,
+                    "destinationNumber": ACCOUNT,
+                    "timestamp": ts,
+                    "message": text,
+                    "attachments": [],
+                    "quote": {
+                        "id": target_ts,
+                        "author": ACCOUNT,
+                        "authorNumber": ACCOUNT,
+                        "text": "Ich habe folgendes erkannt: ...",
+                    },
+                }
+            },
+        }
+    }
+
+
 def _note_to_self_text(text: str, ts: int = 1_718_000_000_000) -> dict[str, object]:
     """Note-to-Self-Textnachricht (verknüpftes Gerät empfängt syncMessage.sentMessage)."""
     return {
@@ -226,6 +257,25 @@ def test_parse_envelope_reaction_remove_ignored() -> None:
     assert ch._parse_envelope(_note_to_self_reaction("👍", is_remove=True)) is None
 
 
+def test_parse_envelope_quote_reply_sets_target_timestamp() -> None:
+    """Eine Quote-Reply setzt quote_target_timestamp auf die ``quote.id``."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
+    target_ts = 1_718_000_000_005
+    msg = ch._parse_envelope(_note_to_self_quote_reply("Nicht Schnitt, sondern Schmidt", target_ts))
+    assert msg is not None
+    assert msg.text == "Nicht Schnitt, sondern Schmidt"
+    assert msg.quote_target_timestamp == target_ts
+    assert msg.is_reaction is False
+
+
+def test_parse_envelope_text_without_quote_has_no_target_timestamp() -> None:
+    """Eine normale Textnachricht hat keinen quote_target_timestamp."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
+    msg = ch._parse_envelope(_note_to_self_text("Normale Notiz"))
+    assert msg is not None
+    assert msg.quote_target_timestamp is None
+
+
 # --------------------------------------------------------------------------- #
 # receive() — via gemocktem WebSocket                                           #
 # --------------------------------------------------------------------------- #
@@ -398,6 +448,7 @@ def test_send_posts_to_correct_endpoint(tmp_path: Path) -> None:
 
     with patch("httpx.post") as mock_post:
         mock_post.return_value.raise_for_status = MagicMock()
+        mock_post.return_value.json.return_value = {}
         ch.send("+49170123456", "Bestätigt! ✅")
 
     mock_post.assert_called_once_with(
@@ -409,6 +460,30 @@ def test_send_posts_to_correct_endpoint(tmp_path: Path) -> None:
         },
         timeout=10.0,
     )
+
+
+def test_send_returns_timestamp_from_response(tmp_path: Path) -> None:
+    """send() gibt den von signal-cli zurückgelieferten Timestamp zurück."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+
+    with patch("httpx.post") as mock_post:
+        mock_post.return_value.raise_for_status = MagicMock()
+        mock_post.return_value.json.return_value = {"timestamp": 1_718_000_000_042}
+        ts = ch.send("+49170123456", "Hallo")
+
+    assert ts == 1_718_000_000_042
+
+
+def test_send_returns_none_when_no_timestamp(tmp_path: Path) -> None:
+    """send() gibt None zurück, wenn die Antwort keinen Timestamp enthält."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+
+    with patch("httpx.post") as mock_post:
+        mock_post.return_value.raise_for_status = MagicMock()
+        mock_post.return_value.json.return_value = {}
+        ts = ch.send("+49170123456", "Hallo")
+
+    assert ts is None
 
 
 # --------------------------------------------------------------------------- #

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kollege.agent import run_extraction
+from kollege.agent import run_extraction, run_revision
 from kollege.channels import Channel, IncomingMessage
 from kollege.config import Settings
 from kollege.db import Repository
@@ -82,6 +82,12 @@ class PendingProposal:
     transcript: str
     result: ExtractionResult
     created_at: datetime = field(default_factory=_now)
+    sent_timestamp: int | None = None
+    """Sende-Timestamp der Vorschlags-Nachricht (von ``channel.send()`` geliefert).
+    Ermöglicht zukünftiges Matching von Quote-Reply ``quote.id``-Feldern auf den
+    genauen Vorschlag. In Phase-A wird per Sender nur ein Vorschlag offen gehalten,
+    daher ist jede Quote-Reply eindeutig — der Timestamp dient als Vorbereitung auf
+    Stufe B (Korrektur bereits persistierter Einträge)."""
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +333,13 @@ class Orchestrator:
                 if sel:
                     self._confirm(msg.sender, indices=sel)
                     return
-            # Kein Treffer → neue Nachricht verarbeiten (ersetzt alten Vorschlag)
+
+        # Quote-Reply auf offenen Vorschlag = Korrektur (Stufe A, Schritt 8.6).
+        # Minimal-Variante: jede Zitat-Antwort bei offenem Vorschlag ist eindeutig
+        # eine Korrektur — pro Absender ist maximal ein Vorschlag offen.
+        if msg.quote_target_timestamp is not None and msg.sender in self._pending:
+            self._revise(msg.sender, msg)
+            return
 
         # Normaler Ablauf: Transkript holen → extrahieren → Vorschlag schicken
         # Sofort-Quittung — knappe Bestätigung vor der langsamen Verarbeitung
@@ -360,12 +372,13 @@ class Orchestrator:
             len(result.project_updates),
         )
 
-        self._pending[msg.sender] = PendingProposal(
+        proposal = PendingProposal(
             sender=msg.sender,
             transcript=transcript,
             result=result,
         )
-        self._channel.send(msg.sender, format_proposal(result))
+        proposal.sent_timestamp = self._channel.send(msg.sender, format_proposal(result))
+        self._pending[msg.sender] = proposal
 
     def run_once(self) -> None:
         """Alle aktuell verfügbaren Nachrichten einmalig verarbeiten.
@@ -425,3 +438,71 @@ class Orchestrator:
     def _reject(self, sender: str) -> None:
         self._pending.pop(sender)
         self._channel.send(sender, "Verworfen. Keine Änderungen gespeichert.")
+
+    def _revise(self, sender: str, msg: IncomingMessage) -> None:
+        """Korrektur-Lauf: revidiert den offenen Vorschlag anhand der Quote-Reply.
+
+        Die Nutzerin zitiert den Vorschlag und schreibt (oder spricht) die Korrektur.
+        Das LLM bekommt Ursprungstranskript + aktuellen Vorschlag + Korrekturtext und
+        liefert ein überarbeitetes ExtractionResult, das erneut als Vorschlag gezeigt
+        wird. Nichts wird bis zur Bestätigung persistiert.
+        """
+        # Sofort-Quittung vor dem langsamen Revisions-Lauf
+        if msg.audio_path is not None and self._transcriber is not None:
+            self._channel.send(sender, "🎤 Sprachkorrektur erhalten, überarbeite den Vorschlag …")
+        else:
+            self._channel.send(sender, "✏️ Korrektur erhalten, überarbeite den Vorschlag …")
+
+        correction_text = self._get_transcript(msg)
+        if correction_text is None or not correction_text.strip():
+            self._channel.send(
+                sender,
+                "Ich konnte die Korrektur nicht lesen. Bitte erneut versuchen.",
+            )
+            return
+
+        proposal = self._pending[sender]
+        logger.info("Korrektur-Lauf für %s: %r", sender, correction_text[:80])
+        try:
+            revised = dedupe_result(
+                run_revision(
+                    original_transcript=proposal.transcript,
+                    current_result=proposal.result,
+                    correction=correction_text,
+                    settings=self._settings,
+                )
+            )
+        except Exception:
+            logger.exception("Fehler beim Korrektur-Lauf für %s", sender)
+            self._channel.send(
+                sender,
+                "⚠ Beim Überarbeiten ist ein Fehler aufgetreten. Bitte neu einsprechen.",
+            )
+            return
+
+        if revised.clarification:
+            logger.info("Korrektur-Lauf: Rückfrage gestellt")
+            self._channel.send(sender, f"Rückfrage: {revised.clarification}")
+            return
+
+        if revised.is_empty():
+            logger.info("Korrektur-Lauf: nichts erkannt")
+            self._channel.send(
+                sender,
+                "Nach der Korrektur konnte ich nichts Konkretes erkennen. Bitte neu einsprechen.",
+            )
+            return
+
+        new_proposal = PendingProposal(
+            sender=sender,
+            transcript=proposal.transcript,
+            result=revised,
+        )
+        new_proposal.sent_timestamp = self._channel.send(sender, format_proposal(revised))
+        self._pending[sender] = new_proposal
+        logger.info(
+            "Korrektur-Lauf: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s)",
+            len(revised.contacts),
+            len(revised.tasks),
+            len(revised.project_updates),
+        )

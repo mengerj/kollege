@@ -12,23 +12,19 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.6 — Korrektur-/Revisions-Schleife (Quote-Reply).**
+**Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig).**
 
-Schritt 8.8 (Sofort-Quittung) ist erledigt. Als nächstes: per Signal-Zitat-Antwort
-auf den Vorschlag korrigieren statt neu einsprechen.
+Schritt 8.6 (Quote-Reply-Revision) ist erledigt. Als nächstes: bekannte
+Kontakt-/Projektnamen aus der DB dem Agenten als Kontext mitgeben, damit Whisper-
+Verhörer (z. B. „Herr Schnitt" → „Schmidt") schon bei der Extraktion erkannt
+und korrigiert werden (statt den Revisions-Schritt bemühen zu müssen).
 
-Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.6):
-1. `channel.send()` muss den Sende-Timestamp zurückgeben (signal-cli `/v2/send`
-   liefert ihn) → `PendingProposal` speichert ihn.
-2. Eingehende Quote-Reply (`quote.id` matcht `PendingProposal.sent_timestamp`)
-   → Revisions-Lauf: LLM bekommt (Ursprungstranskript + aktuelles ExtractionResult
-   + Korrekturtext) → revidiertes ExtractionResult → erneuter Vorschlag.
-3. Quote-Reply kann auch Audio sein → erst transkribieren, dann als Korrekturtext.
-4. Frische Nachricht ohne Quote bleibt neue Notiz (kein Bruch im bestehenden Ablauf).
-5. Test-driven: Quote-Parsing + Revisions-Branch mit `TestModel`/`FunctionModel`.
-
-Erst Quote-Envelope live mitschneiden (`signal_debug_receive.py`), um Feldnamen
-(`quote.id`/`quote.author`/`quote.text`) zu verifizieren, bevor geparsed wird.
+Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.7):
+1. Vor der Extraktion bekannte Namen aus dem Repo laden und dem Agenten als
+   Kontext geben (System-Prompt-Anhang oder Tool `lookup_known_names()`).
+2. Kandidaten vorfiltern (kürzlich aktiv / grobe Ähnlichkeit) bei großer DB.
+3. Mehrdeutigkeit → `clarification` statt stilles Überschreiben.
+4. Test-driven: Abgleich-/Vorfilter-Logik; LLM-Teil via `TestModel`/`FunctionModel`.
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 
@@ -48,7 +44,7 @@ Erst Quote-Envelope live mitschneiden (`signal_debug_receive.py`), um Feldnamen
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ✅ erledigt |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
 | 8.5 | Signal-Live-Betrieb + Härtung | 1.5 | ⏳ läuft (Live-Tests/Edge-Cases) |
-| 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ⬜ offen (geplant) |
+| 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ✅ erledigt |
 | 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ⬜ offen (geplant) |
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
@@ -169,7 +165,7 @@ Absturz-Resistenz, Logging, Audio-E2E, Dedup, „(kein Datum)"). Verbleibend: re
 Edge-Cases (Guide §4) live gegenprüfen.
 **DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün im Alltag.
 
-### Schritt 8.6 — Korrektur-/Revisions-Schleife (natürlichsprachig) ⬜
+### Schritt 8.6 — Korrektur-/Revisions-Schleife (natürlichsprachig) ✅
 
 **Motiv.** Transkription (auch mit größeren Whisper-Modellen) und das LLM machen
 gelegentlich Fehler — typisch ein **falsch verstandener Name** („Herr Schnitt"
@@ -212,11 +208,9 @@ Referenz auf persistierte Items (`LastPersistedBatch`), neue Repo-Methoden
 Konsistenz** und Merge-Semantik bei Kontakt-Umbenennung (`upsert_contact` dedupt per
 Name → „Schnitt"→„Schmidt" könnte zwei Einträge zusammenführen). Scope bewusst hinter A.
 
-**DoD (Stufe A):** Eine Zitat-Antwort auf den Vorschlag („nicht X sondern Y",
-„Datum ist Freitag") revidiert den Vorschlag sichtbar, ohne neu einsprechen zu
-müssen; Bestätigung speichert die korrigierte Fassung; eine frische Nachricht bleibt
-eine neue Notiz. Quote-Parsing + Revisions-Branch test-driven; LLM-Teil via
-`TestModel`/`FunctionModel`.
+**DoD (Stufe A):** ✅ Eine Zitat-Antwort auf den Vorschlag revidiert den Vorschlag
+sichtbar; Bestätigung speichert die korrigierte Fassung; frische Nachricht bleibt
+neue Notiz. Quote-Parsing + Revisions-Branch test-driven; 148 Tests grün.
 
 ### Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig statt Whisper-Prompt) ⬜
 
