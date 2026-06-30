@@ -12,36 +12,29 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Phase-1-Live-Stabilisierung** — Härtungs-Backlog (Guide §6) ist **umgesetzt und
-live verifiziert** (👍-Reaktion, Absturz-Resistenz, Logging, Audio-E2E, Dedup,
-„(kein Datum)"). Modell-Default ist jetzt `ornith:9b` (tool-fähig, korrekt; warm
-16 tok/s, Cold-Start ~3 Min bei RAM-Druck — bewusst akzeptiert).
+**Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns** (vor E-Mail/IMAP).
 
-**Verbleibend vor Schritt 9:** restliche Edge-Cases der Tabelle (Guide §4) live
-durchspielen und gegenprüfen:
-- Explizites Datum („Am 07.07 …" → nächstes zukünftiges Vorkommen).
-- Mehrere Tasks (sinnvolle Trennung, keine Duplikate — Dedup beobachten).
-- Unklar → `clarification` statt geraten.
-- Nummerierte Teilauswahl („1 3") per Text (Reaktion deckt nur „alles" ab).
-- Ablehnen („nein") → nichts gespeichert.
+Der Live-Härtungs-Backlog (Guide §6) ist umgesetzt und verifiziert; technisch läuft
+der Signal-Bot End-to-End. **Bevor neue Kanäle dazukommen, muss sich der bestehende
+Kern im Alltag flüssig und vertrauenswürdig anfühlen** — genau das entscheidet über
+freiwillige Weiternutzung (Designprinzip 6), nicht zusätzliche Features. IMAP wird
+deshalb bewusst zurückgestellt (siehe unten).
 
-**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün. ✓ 👍-Bestätigung,
-Absturz-Resistenz, Datumsauflösung (morgen/übermorgen), Audio-E2E bereits bestätigt.
+Reihenfolge nach Wirkung auf „fühlt sich gut an" (Details in **Phase 1.5** unten):
+1. **Sofort-Quittung** (Schritt 8.8) — sonst wirkt die Cold-Start-Latenz wie „nichts
+   passiert" (genau so erlebt). Niedrigste Hürde, höchster gefühlter Gewinn.
+2. **Korrektur-/Revisions-Schleife** (Schritt 8.6) — Transkriptions-/Namensfehler
+   natürlichsprachig beheben statt neu einsprechen.
+3. **DB-Vokabular für die Transkription** (Schritt 8.7) — bekannte Kontakt-/
+   Projektnamen als Whisper-`initial_prompt`, damit Namen seltener falsch ankommen.
+4. Danach **robuster Dauerbetrieb** (8.9) und **Eval-Set** (8.10).
 
-> **Schritt 9 (IMAP)** ist bereits auf einem **separaten Branch** angefangen.
-> Reihenfolge: diesen Live-Betrieb-PR zuerst nach `main` mergen, dann `main` in
-> den Schritt-9-Branch mergen. Schritt 9 wird erst **nach** der Stabilisierung
-> fortgeführt.
+Parallel weiter: restliche Edge-Cases der Tabelle (Guide §4) live gegenprüfen
+(explizites Datum, mehrere Tasks/Dedup, `clarification`, Teilauswahl „1 3", „nein").
 
----
-
-## Schritt 9 — IMAP read-only (t-online) *(begonnen, separater Branch)*
-
-`secureimap.t-online.de:993` SSL, strikt lesend. E-Mail-Passwort aus Config/Secrets.
-- Optionale Dependency-Gruppe `email` (`imapclient` o.ä.) in `pyproject.toml`.
-- `Channel`-ähnliches Interface oder direktes Einlesen in den Orchestrator.
-- Lazy-Import + Tests gegen Mocks; kein echter IMAP-Server im CI.
-**DoD:** Mails lesen ohne jede Schreiboperation (kein Flag/Move).
+> **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft. Der
+> begonnene Schritt-9-Branch bleibt liegen; die Reihenfolge wird neu bewertet, wenn
+> sich der Sprachnotiz-Kern flüssig anfühlt.
 
 ---
 
@@ -58,9 +51,13 @@ Absturz-Resistenz, Datumsauflösung (morgen/übermorgen), Audio-E2E bereits best
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ✅ erledigt |
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ✅ erledigt |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
-| 8.5 | Signal-Live-Betrieb + Phase-1-Stabilisierung | 1 | ⏳ läuft (Live-Tests/Härtung) |
-| 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1 | ⬜ offen (geplant) |
-| 9 | IMAP read-only (t-online) | 2 | 🚧 begonnen (separater Branch), pausiert |
+| 8.5 | Signal-Live-Betrieb + Härtung | 1.5 | ⏳ läuft (Live-Tests/Edge-Cases) |
+| 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ⬜ offen (geplant) |
+| 8.7 | DB-Vokabular für Transkription (Whisper `initial_prompt`) | 1.5 | ⬜ offen (geplant) |
+| 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ⬜ offen (geplant) |
+| 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
+| 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
+| 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
 | 12 | Statusabfragen per Chat | 2 | ⬜ offen |
@@ -161,6 +158,21 @@ Lokale Simulation (MemoryChannel) + echter Ollama (qwen2.5:7b-instruct) + Whispe
 Echter Signal-Trockenlauf (mit Docker + Smartphone) steht noch aus, ist aber kein Blocker.
 **DoD:** ✅ Extraktion → DB → Bestätigung sauber dokumentiert beantwortet (siehe PROJECT_LOG.md).
 
+---
+
+## Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns *(vor Phase 2)*
+
+*Ziel der Phase: Der bestehende Kern (Sprachnotiz → Vorschlag → Bestätigung → DB)
+soll sich im Alltag **flüssig, schnell genug und vertrauenswürdig** anfühlen.
+Maßstab ist nicht „mehr Features", sondern **freiwillige Weiternutzung**
+(Designprinzip 6). Erst danach kommt E-Mail (Phase 2).*
+
+### Schritt 8.5 — Signal-Live-Betrieb + Härtung ⏳
+Echter Bot verknüpft, §6-Backlog umgesetzt und live verifiziert (👍-Reaktion,
+Absturz-Resistenz, Logging, Audio-E2E, Dedup, „(kein Datum)"). Verbleibend: restliche
+Edge-Cases (Guide §4) live gegenprüfen.
+**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün im Alltag.
+
 ### Schritt 8.6 — Korrektur-/Revisions-Schleife (natürlichsprachig) ⬜
 
 **Motiv.** Transkription (auch mit größeren Whisper-Modellen) und das LLM machen
@@ -209,14 +221,79 @@ einsprechen zu müssen; Bestätigung speichert die korrigierte Fassung. Determin
 Teile (Intent-Branching, Revisions-Merge) test-driven; LLM-Teile via
 `TestModel`/`FunctionModel`.
 
+### Schritt 8.7 — DB-Vokabular für die Transkription (Whisper `initial_prompt`) ⬜
+
+**Motiv.** Whisper verhört **Eigennamen** am häufigsten („Herr Schnitt" statt
+„Schmidt"). `faster-whisper.transcribe(initial_prompt=…)` biast den Decoder Richtung
+vorgegebener Schreibweisen — ideal, um **bekannte Namen aus der eigenen DB** als
+Vokabular mitzugeben. Die Namen, die im Alltag vorkommen, stehen ja längst als
+Kontakte/Projekte in der Datenbank.
+
+**Ansatz.**
+- Quelle: Kontaktnamen + Projektnamen (später ggf. Orts-/Gemeindenamen) aus dem
+  Repository, zu einem knappen Hinweis-String zusammengesetzt
+  (z. B. „Namen: Schmidt, Familie Müller, Naturpark, Stadtpark").
+- **Architektur entkoppelt lassen:** das `Transcriber`-Protocol um einen optionalen
+  Hinweis-Parameter erweitern (`transcribe(path, *, vocabulary: str | None = None)`);
+  den String baut der **Orchestrator** (hat das Repo) und reicht ihn durch.
+  `StubTranscriber` ignoriert ihn → Tests bleiben netz-/modellfrei.
+- **DSGVO:** Whisper läuft lokal, die Namen verlassen das Gerät nicht — konsistent
+  mit Datensparsamkeit.
+
+**Grenzen / Risiken (im Schritt entscheiden).**
+- `initial_prompt` ist **tokenbegrenzt** (~224 Tokens). Für eine Einzelnutzerin lange
+  unkritisch; bei wachsender DB kuratieren (z. B. nur kürzlich aktive Kontakte) und
+  hart begrenzen, statt alles zu dumpen.
+- **Überbiasing** kann Whisper dazu bringen, Prompt-Wörter zu *halluzinieren* →
+  kurze, kuratierte Liste, kein Volltext; mit dem Eval-Set (8.10) absichern.
+
+**DoD:** Eine Sprachnotiz mit einem Namen, der in der DB steht, wird zuverlässiger
+korrekt transkribiert als ohne Hinweis; ohne DB-Treffer unverändertes Verhalten.
+Test: Orchestrator baut den Hinweis deterministisch aus dem Repo; Transcriber-Mock
+prüft die Übergabe.
+
+### Schritt 8.8 — Sofort-Quittung / gefühlte Reaktionszeit ⬜
+Cold-Start + Whisper + LLM erzeugen spürbare Latenz; ohne Rückmeldung wirkt das wie
+„nichts passiert" (live so erlebt). Eine **knappe Sofort-Bestätigung** beim Eingang
+(z. B. „🎤 hab ich, ich verarbeite das kurz …") nimmt die Unsicherheit, bevor der
+eigentliche Vorschlag kommt. Optional: Hinweis bei ungewöhnlich langem Lauf.
+**DoD:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt wie
+gehabt. Kein Doppel-Senden mehr aus Ungeduld.
+
+### Schritt 8.9 — Robuster Dauerbetrieb ⬜
+Der Bot soll **unbeaufsichtigt** laufen und Störungen überleben:
+- Als Dienst mit **Auto-Restart** (launchd/systemd) statt manuellem `nohup`.
+- **Modell warm halten** bzw. Cold-Start abfedern (Pre-Warm beim Start; Trade-off
+  RAM beachten — vgl. ornith-Erfahrung).
+- Sauberer Umgang, wenn Ollama/Whisper/Container kurz weg sind (Meldung statt Crash).
+- **Nachrichten-Verlust bei Verbindungslücke prüfen** (beim RAM-Engpass beobachtet):
+  klären, ob signal-cli Nachrichten der Lücke nachliefert; sonst Gegenmaßnahme.
+**DoD:** Bot übersteht Neustart von Ollama/Container und einen RAM-Engpass, ohne dass
+eine Notiz still verloren geht.
+
+### Schritt 8.10 — Eval-Set für Extraktionsqualität ⬜
+Kleines Fixture-Set aus Beispiel-Transkripten → erwartete Felder (Schwellen/Smoke,
+kein striktes Assert). Macht **Modell-/Prompt-Wechsel messbar** (ornith ↔ qwen ↔ …)
+und sichert Dedup/Datumsauflösung/Vokabular-Bias (8.7) gegen Regression ab.
+Modell-agnostisch; im CI ohne echtes LLM (`TestModel`/`FunctionModel`), echte Modelle
+nur im manuellen Lauf.
+**DoD:** `make eval` o. ä. zeigt pro Modell eine Trefferquote über die Fixtures.
+
 ---
 
-## Phase 2 — E-Mail & Übersicht
+## Phase 2 — E-Mail & Übersicht *(zurückgestellt bis Phase 1.5 rund läuft)*
 
 *Ziel: Der Assistent beantwortet „bei wem muss ich mich melden?".*
 
-### Schritt 9 — IMAP read-only (t-online) ⬜
+> **Bewusst zurückgestellt.** Erst wenn sich der Sprachnotiz-Kern im Alltag flüssig
+> anfühlt (Phase 1.5), wird E-Mail angegangen. Der Schritt-9-Branch ist begonnen,
+> liegt aber; die Reihenfolge wird danach neu bewertet.
+
+### Schritt 9 — IMAP read-only (t-online) 🅿️ *(begonnen, separater Branch, pausiert)*
 `secureimap.t-online.de:993` SSL, strikt lesend. E-Mail-Passwort aus Config/Secrets.
+- Optionale Dependency-Gruppe `email` (`imapclient` o. ä.) in `pyproject.toml`.
+- `Channel`-ähnliches Interface oder direktes Einlesen in den Orchestrator.
+- Lazy-Import + Tests gegen Mocks; kein echter IMAP-Server im CI.
 **DoD:** Mails lesen ohne jede Schreiboperation (kein Flag/Move).
 
 ### Schritt 10 — Task-Extraktion aus E-Mail + CommunicationLog ⬜
