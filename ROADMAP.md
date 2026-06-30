@@ -12,19 +12,21 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Phase-1-Live-Stabilisierung** (vor Schritt 9). Der Signal-Bot läuft echt
-(verknüpft, End-to-End getestet). Jetzt im Alltag stabilisieren, **bevor** neue
-Kanäle dazukommen. Vollständige Einweisung + Backlog:
-[docs/live-testing-guide.md](docs/live-testing-guide.md).
+**Phase-1-Live-Stabilisierung** — Härtungs-Backlog (Guide §6) ist **umgesetzt und
+live verifiziert** (👍-Reaktion, Absturz-Resistenz, Logging, Audio-E2E, Dedup,
+„(kein Datum)"). Modell-Default ist jetzt `ornith:9b` (tool-fähig, korrekt; warm
+16 tok/s, Cold-Start ~3 Min bei RAM-Druck — bewusst akzeptiert).
 
-Schwerpunkte (Details/Priorität im Guide §6):
-- 👍-**Reaktion** als Bestätigung erkennen (Tapback ≠ Text; entspricht Design).
-- **`run_forever()` härten** (Fehler fangen, weiterlaufen statt abstürzen).
-- **Logging** im Orchestrator (Empfang/Extraktion/Persistenz nachvollziehbar).
-- **Sprachnachrichten** end-to-end verifizieren; Über-Extraktion eindämmen.
+**Verbleibend vor Schritt 9:** restliche Edge-Cases der Tabelle (Guide §4) live
+durchspielen und gegenprüfen:
+- Explizites Datum („Am 07.07 …" → nächstes zukünftiges Vorkommen).
+- Mehrere Tasks (sinnvolle Trennung, keine Duplikate — Dedup beobachten).
+- Unklar → `clarification` statt geraten.
+- Nummerierte Teilauswahl („1 3") per Text (Reaktion deckt nur „alles" ab).
+- Ablehnen („nein") → nichts gespeichert.
 
-**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün, 👍-Bestätigung,
-Absturz-Resistenz, korrekte Datumsauflösung.
+**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün. ✓ 👍-Bestätigung,
+Absturz-Resistenz, Datumsauflösung (morgen/übermorgen), Audio-E2E bereits bestätigt.
 
 > **Schritt 9 (IMAP)** ist bereits auf einem **separaten Branch** angefangen.
 > Reihenfolge: diesen Live-Betrieb-PR zuerst nach `main` mergen, dann `main` in

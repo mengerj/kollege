@@ -190,39 +190,54 @@ wieder auftauchen werden:
 
 8. **Modellqualität (qwen2.5:7b).** Neigt zu **Über-Extraktion**: zerlegt einen
    Satz in mehrere überlappende Tasks, dupliziert, lässt `due` mal weg. Kein
-   Code-Bug — Human-in-the-loop fängt es ab (Auswahl „1 3"). Kandidat für
-   Prompt-Tuning oder stärkeres Modell, falls es im Alltag stört.
+   Code-Bug — Human-in-the-loop fängt es ab (Auswahl „1 3"). Jetzt zusätzlich von
+   `dedupe_result` abgefedert (§6.5).
+
+9. **Signal-Audio kommt als AAC/MP4, nicht (mehr) OGG.** Neuere Clients senden
+   `audio/aac`; `_download_attachment` leitet die Endung aus dem contentType ab.
+   Funktional unkritisch (faster-whisper erkennt das Format am Inhalt), aber fürs
+   Debuggen relevant.
+
+10. **Modell `ornith:9b` (Erfahrung 2026-06-30).** Tool-fähig, Extraktion korrekt
+    (Datum, Verknüpfung, keine Über-Extraktion). Aber:
+    - **Braucht Ollama > 0.30.8** (sonst 412 beim Pull). Server war die
+      Ollama.app (0.30.8) → via Homebrew auf 0.30.11.
+    - **Cold-Start ist der Engpass, nicht „Thinking".** Warm: 16 tok/s, 100 % GPU,
+      passt in VRAM. Bei RAM-Druck (~1 GB frei) entlädt Ollama das Modell zwischen
+      Nachrichten → Reload ~3 Min (verschärft, wenn Whisper gleichzeitig lädt).
+    - **`think:false` wirkungslos** — ornith hat intrinsisches Reasoning
+      (Coding-Modell, raw `{{ .Prompt }}`-Template); der Ollama-Flag unterdrückt es
+      nicht. Bei RAM-Engpass ist `qwen2.5:7b-instruct` der leichtere Fallback.
 
 ---
 
 ## 6. Bekannte Lücken / Härtungs-Kandidaten (Backlog für diese Test-Phase)
 
-Priorisiert nach „blockiert das den Alltag?". Jede Änderung: erst Test (wo
-sinnvoll), dann Code, CI grün, kleiner Commit.
+> **Stand 2026-06-30: alle sechs Punkte umgesetzt** (Branch `feat/phase1-haertung`,
+> 131 Tests grün, live verifiziert). Hier als Doku belassen.
 
-1. **Reaktions-Bestätigung (👍 als Tapback).** Entspricht ausdrücklich dem Design
-   („Emoji 👍 / nummerierte Auswahl"). Plan: in `_parse_envelope` das
-   `reaction`-Feld (in `dataMessage`/`syncMessage.sentMessage`) auslesen; eine
-   `reaction` auf den letzten Vorschlag als „ja" werten. Vorher **eine echte
-   Reaktion mit `signal_debug_receive.py` mitschneiden**, um die genaue Struktur
-   (Feld `targetSentTimestamp`, `emoji`, `isRemove`) zu kennen.
+1. ✅ **Reaktions-Bestätigung (👍 als Tapback).** `_parse_envelope` liest jetzt
+   das `reaction`-Feld in `syncMessage.sentMessage` (`emoji`, `isRemove`);
+   `IncomingMessage.is_reaction`. Der Orchestrator wertet 👍 auf einen offenen
+   Vorschlag als „ja", andere/leere Reaktionen werden ignoriert. **Live
+   bestätigt.** (Teilauswahl „1 3" bleibt vorerst Text-only.)
 
-2. **`run_forever()` härten.** try/except um die Verarbeitung pro Nachricht:
-   Fehler loggen, dem Nutzer eine knappe Fehlermeldung schicken, **weiterlaufen**
-   statt abstürzen. Optional: Reconnect-Backoff.
+2. ✅ **`run_forever()`/`run_once()` gehärtet.** try/except pro Nachricht: Fehler
+   wird geloggt, der Absender bekommt eine knappe Meldung, der Bot läuft weiter.
+   Die Poll-Schleife selbst fängt ebenfalls Fehler ab.
 
-3. **Mehr Logging im Orchestrator.** Eingang (Absender, Text-/Audio-Flag),
-   Extraktionsergebnis (Anzahl Items / clarification), Persistenz (was gespeichert).
-   Strukturiert genug, dass eine Monitoring-Session den Verlauf nachvollziehen kann.
+3. ✅ **Logging im Orchestrator.** Eingang (Absender, Typ Text/Audio/Reaktion),
+   Extraktion (Anzahl / clarification), Persistenz, Fehler — datensparsam (keine
+   Inhalte). `run_signal.py` setzt `logging.basicConfig`.
 
-4. **Vorschlag zeigt `due` immer an** — auch „(kein Datum)". Dann sieht der Nutzer
-   ein fehlendes/falsches Datum **vor** der Bestätigung.
+4. ✅ **Vorschlag zeigt `due` immer an** — auch „(kein Datum)".
 
-5. **Über-Extraktion eindämmen.** Prompt schärfen Richtung „so wenige, klar
-   getrennte Tasks wie möglich, keine Duplikate"; ggf. Dedup in `persist_result`.
+5. ✅ **Über-Extraktion eindämmen.** `dedupe_result` entdoppelt vor dem Vorschlag
+   (Kontakte per Name, Tasks per Titel+Datum, Updates per Projekt); System-Prompt
+   zusätzlich geschärft.
 
-6. **Sprachnachrichten end-to-end verifizieren** (echte Audio-Notiz, nicht nur
-   Stille-WAV aus dem Trockenlauf).
+6. ✅ **Sprachnachrichten end-to-end verifiziert** (echte Audio-Notiz → Whisper →
+   Vorschlag). Hinweis: erstes Audio lädt `faster-whisper-medium` (~4 Min einmalig).
 
 ---
 
