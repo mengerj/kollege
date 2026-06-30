@@ -24,7 +24,77 @@ ACCOUNT = "+49123456789"
 # --------------------------------------------------------------------------- #
 
 
-def _text_envelope(sender: str, text: str, ts: int = 1_718_000_000_000) -> dict[str, object]:
+def _note_to_self_text(text: str, ts: int = 1_718_000_000_000) -> dict[str, object]:
+    """Note-to-Self-Textnachricht (verknüpftes Gerät empfängt syncMessage.sentMessage)."""
+    return {
+        "envelope": {
+            "source": ACCOUNT,
+            "sourceNumber": ACCOUNT,
+            "sourceDevice": 1,
+            "timestamp": ts,
+            "syncMessage": {
+                "sentMessage": {
+                    "destination": ACCOUNT,
+                    "destinationNumber": ACCOUNT,
+                    "timestamp": ts,
+                    "message": text,
+                    "attachments": [],
+                }
+            },
+        }
+    }
+
+
+def _note_to_self_audio(att_id: str, ts: int = 1_718_000_000_001) -> dict[str, object]:
+    """Note-to-Self-Sprachnachricht mit Audio-Anhang."""
+    return {
+        "envelope": {
+            "source": ACCOUNT,
+            "sourceNumber": ACCOUNT,
+            "sourceDevice": 1,
+            "timestamp": ts,
+            "syncMessage": {
+                "sentMessage": {
+                    "destination": ACCOUNT,
+                    "destinationNumber": ACCOUNT,
+                    "timestamp": ts,
+                    "message": None,
+                    "attachments": [
+                        {
+                            "contentType": "audio/ogg; codecs=opus",
+                            "id": att_id,
+                            "size": 1234,
+                        }
+                    ],
+                }
+            },
+        }
+    }
+
+
+def _sent_to_other(other: str, text: str, ts: int = 1_718_000_000_003) -> dict[str, object]:
+    """Nutzer schreibt an einen Kontakt — KEIN Note-to-Self, muss ignoriert werden."""
+    return {
+        "envelope": {
+            "source": ACCOUNT,
+            "sourceNumber": ACCOUNT,
+            "sourceDevice": 1,
+            "timestamp": ts,
+            "syncMessage": {
+                "sentMessage": {
+                    "destination": other,
+                    "destinationNumber": other,
+                    "timestamp": ts,
+                    "message": text,
+                    "attachments": [],
+                }
+            },
+        }
+    }
+
+
+def _incoming_from_other(sender: str, text: str, ts: int = 1_718_000_000_004) -> dict[str, object]:
+    """Eingehende Nachricht einer anderen Person (dataMessage) — muss ignoriert werden."""
     return {
         "envelope": {
             "source": sender,
@@ -34,27 +104,6 @@ def _text_envelope(sender: str, text: str, ts: int = 1_718_000_000_000) -> dict[
                 "timestamp": ts,
                 "message": text,
                 "attachments": [],
-            },
-        }
-    }
-
-
-def _audio_envelope(sender: str, att_id: str, ts: int = 1_718_000_000_001) -> dict[str, object]:
-    return {
-        "envelope": {
-            "source": sender,
-            "sourceNumber": sender,
-            "timestamp": ts,
-            "dataMessage": {
-                "timestamp": ts,
-                "message": None,
-                "attachments": [
-                    {
-                        "contentType": "audio/ogg; codecs=opus",
-                        "id": att_id,
-                        "size": 1234,
-                    }
-                ],
             },
         }
     }
@@ -95,15 +144,15 @@ def test_signal_channel_is_a_channel() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_parse_envelope_text_message() -> None:
+def test_parse_envelope_note_to_self_text() -> None:
     ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
-    data = _text_envelope("+49170", "Hallo!")
+    data = _note_to_self_text("Hallo!")
     msg = ch._parse_envelope(data)
     assert msg is not None
-    assert msg.sender == "+49170"
+    assert msg.sender == ACCOUNT
     assert msg.text == "Hallo!"
     assert msg.audio_path is None
-    assert msg.message_id == "+49170:1718000000000"
+    assert msg.message_id == f"{ACCOUNT}:1718000000000"
 
 
 def test_parse_envelope_receipt_returns_none() -> None:
@@ -112,15 +161,23 @@ def test_parse_envelope_receipt_returns_none() -> None:
     assert ch._parse_envelope(data) is None
 
 
-def test_parse_envelope_empty_data_message_returns_none() -> None:
+def test_parse_envelope_empty_sent_message_returns_none() -> None:
     ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
-    data: dict[str, object] = {
-        "envelope": {
-            "sourceNumber": "+49170",
-            "timestamp": 1718000000,
-            "dataMessage": {"message": None, "attachments": []},
-        }
-    }
+    data = _note_to_self_text(None)  # type: ignore[arg-type]
+    assert ch._parse_envelope(data) is None
+
+
+def test_parse_envelope_incoming_from_other_ignored() -> None:
+    """Nachrichten anderer Personen (dataMessage) werden bewusst nicht verarbeitet."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
+    data = _incoming_from_other("+49170999", "Hallo, bist du da?")
+    assert ch._parse_envelope(data) is None
+
+
+def test_parse_envelope_sent_to_other_ignored() -> None:
+    """Vom Nutzer an einen Kontakt gesendete Nachrichten sind kein Note-to-Self."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
+    data = _sent_to_other("+49170999", "Bis morgen!")
     assert ch._parse_envelope(data) is None
 
 
@@ -130,17 +187,17 @@ def test_parse_envelope_empty_data_message_returns_none() -> None:
 
 
 def test_receive_text_message(tmp_path: Path) -> None:
-    envelope = _text_envelope("+49170123456", "Hallo!")
+    envelope = _note_to_self_text("Hallo!")
     conn = _mock_ws_connection([envelope])
 
     ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
 
     with patch("websockets.sync.client.connect") as mock_connect:
-        mock_connect.return_value.__enter__.return_value = conn
+        mock_connect.return_value = conn
         messages = list(ch.receive())
 
     assert len(messages) == 1
-    assert messages[0].sender == "+49170123456"
+    assert messages[0].sender == ACCOUNT
     assert messages[0].text == "Hallo!"
     assert messages[0].audio_path is None
 
@@ -148,7 +205,7 @@ def test_receive_text_message(tmp_path: Path) -> None:
 def test_receive_audio_message(tmp_path: Path) -> None:
     """Sprachnachricht: Anhang wird heruntergeladen, Pfad in IncomingMessage gesetzt."""
     att_id = "abc123"
-    envelope = _audio_envelope("+49170123456", att_id)
+    envelope = _note_to_self_audio(att_id)
     conn = _mock_ws_connection([envelope])
 
     fake_audio = b"OGG_FAKE_AUDIO"
@@ -159,7 +216,7 @@ def test_receive_audio_message(tmp_path: Path) -> None:
         patch("websockets.sync.client.connect") as mock_connect,
         patch("httpx.get") as mock_get,
     ):
-        mock_connect.return_value.__enter__.return_value = conn
+        mock_connect.return_value = conn
         mock_get.return_value.content = fake_audio
         mock_get.return_value.raise_for_status = MagicMock()
 
@@ -180,15 +237,15 @@ def test_receive_audio_message(tmp_path: Path) -> None:
 
 def test_receive_multiple_messages(tmp_path: Path) -> None:
     envelopes = [
-        _text_envelope("+49170", "Eins"),
-        _text_envelope("+49171", "Zwei"),
+        _note_to_self_text("Eins", ts=1_718_000_000_010),
+        _note_to_self_text("Zwei", ts=1_718_000_000_011),
     ]
     conn = _mock_ws_connection(envelopes)
 
     ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
 
     with patch("websockets.sync.client.connect") as mock_connect:
-        mock_connect.return_value.__enter__.return_value = conn
+        mock_connect.return_value = conn
         messages = list(ch.receive())
 
     assert len(messages) == 2
@@ -198,18 +255,38 @@ def test_receive_multiple_messages(tmp_path: Path) -> None:
 def test_receive_skips_receipt_messages(tmp_path: Path) -> None:
     envelopes = [
         _receipt_envelope("+49170"),
-        _text_envelope("+49170", "echte Nachricht"),
+        _note_to_self_text("echte Nachricht"),
     ]
     conn = _mock_ws_connection(envelopes)
 
     ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
 
     with patch("websockets.sync.client.connect") as mock_connect:
-        mock_connect.return_value.__enter__.return_value = conn
+        mock_connect.return_value = conn
         messages = list(ch.receive())
 
     assert len(messages) == 1
     assert messages[0].text == "echte Nachricht"
+
+
+def test_receive_ignores_messages_from_other_people(tmp_path: Path) -> None:
+    """Nur Note-to-Self wird verarbeitet; fremde dataMessages werden übersprungen."""
+    envelopes = [
+        _incoming_from_other("+49170999", "Spam von Fremden"),
+        _sent_to_other("+49170888", "Nachricht an Kontakt"),
+        _note_to_self_text("meine Notiz"),
+    ]
+    conn = _mock_ws_connection(envelopes)
+
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+
+    with patch("websockets.sync.client.connect") as mock_connect:
+        mock_connect.return_value = conn
+        messages = list(ch.receive())
+
+    assert len(messages) == 1
+    assert messages[0].text == "meine Notiz"
+    assert messages[0].sender == ACCOUNT
 
 
 def test_receive_ws_url_is_constructed_correctly(tmp_path: Path) -> None:
@@ -217,10 +294,53 @@ def test_receive_ws_url_is_constructed_correctly(tmp_path: Path) -> None:
     ch = SignalChannel(base_url="http://myhost:8080", account="+49123", download_dir=tmp_path)
 
     with patch("websockets.sync.client.connect") as mock_connect:
-        mock_connect.return_value.__enter__.return_value = conn
+        mock_connect.return_value = conn
         list(ch.receive())
 
     mock_connect.assert_called_once_with("ws://myhost:8080/v1/receive/+49123")
+
+
+def test_receive_reuses_one_persistent_connection(tmp_path: Path) -> None:
+    """Regression: Verbindung bleibt offen, sonst gehen Nachrichten in den Lücken verloren.
+
+    Im json-rpc-Modus werden Nachrichten nicht erneut abgespielt. Mehrere
+    ``receive()``-Aufrufe dürfen daher nur EINE WebSocket-Verbindung öffnen.
+    """
+    conn = MagicMock()
+    # 1. Aufruf: eine Nachricht, dann Timeout; 2. Aufruf: direkt Timeout.
+    conn.recv.side_effect = [
+        json.dumps(_note_to_self_text("erste")),
+        TimeoutError(),
+        TimeoutError(),
+    ]
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+
+    with patch("websockets.sync.client.connect") as mock_connect:
+        mock_connect.return_value = conn
+        first = list(ch.receive())
+        second = list(ch.receive())
+
+    assert [m.text for m in first] == ["erste"]
+    assert second == []
+    mock_connect.assert_called_once()  # Verbindung wurde wiederverwendet, nicht neu geöffnet
+
+
+def test_receive_reconnects_after_connection_error(tmp_path: Path) -> None:
+    """Nach einem Verbindungsfehler wird beim nächsten Aufruf neu verbunden."""
+    broken = MagicMock()
+    broken.recv.side_effect = OSError("connection lost")
+    healthy = _mock_ws_connection([_note_to_self_text("nach reconnect")])
+
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+
+    with patch("websockets.sync.client.connect") as mock_connect:
+        mock_connect.side_effect = [broken, healthy]
+        first = list(ch.receive())  # Fehler → Verbindung wird geschlossen
+        second = list(ch.receive())  # baut neu auf
+
+    assert first == []
+    assert [m.text for m in second] == ["nach reconnect"]
+    assert mock_connect.call_count == 2
 
 
 # --------------------------------------------------------------------------- #

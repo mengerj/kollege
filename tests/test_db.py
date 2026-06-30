@@ -234,3 +234,51 @@ def test_open_repository_creates_file(tmp_path: pytest.TempPathFactory) -> None:
         for row in r._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
     assert "contacts" in tables
+
+
+# --------------------------------------------------------------------------- #
+# Nebenläufigkeit                                                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_repository_is_thread_safe() -> None:
+    """Gleichzeitige Schreibzugriffe aus mehreren Threads dürfen nicht kollidieren.
+
+    Regression: Pydantic-AI führt Agent-Tools nebenläufig in Worker-Threads aus,
+    die sich eine ``sqlite3.Connection`` teilen. Ohne Serialisierung schlug das
+    mit ``InterfaceError: bad parameter or other API misuse`` (o.ä.) fehl.
+    """
+    import threading
+
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    repo = Repository(conn)
+
+    n_threads = 8
+    per_thread = 25
+    barrier = threading.Barrier(n_threads)
+    errors: list[Exception] = []
+
+    def worker(tid: int) -> None:
+        barrier.wait()  # maximalen gleichzeitigen Start erzwingen
+        try:
+            for i in range(per_thread):
+                repo.upsert_contact(ExtractedContact(name=f"Kontakt {tid}-{i}"))
+                repo.get_or_create_project(f"Projekt {tid}-{i}")
+                repo.create_task(
+                    Task(
+                        title=f"Aufgabe {tid}-{i}",
+                        status=TaskStatus.OFFEN,
+                        source=TaskSource.SPRACHNOTIZ,
+                    )
+                )
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Nebenläufige Zugriffe schlugen fehl: {errors[:3]}"
+    assert len(repo.query_open_items()) == n_threads * per_thread

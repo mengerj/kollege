@@ -5,6 +5,53 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — Signal-Live-Inbetriebnahme (Schritt 6/7 gehärtet)
+
+Erste **echte** Verknüpfung mit Signal und End-to-End-Test mit dem Live-Bot
+(zuvor nur Trockenlauf mit `MemoryChannel`). Dabei mehrere Live-only-Bugs
+gefunden und behoben. Vollständige Einweisung für die nächste Test-Session:
+[docs/live-testing-guide.md](docs/live-testing-guide.md).
+
+**Getan:**
+- **Signal verknüpft** — Container gestartet, als Linked Device am eigenen Konto
+  angemeldet (QR via `/v1/qrcodelink` als PNG, kein `qrencode` nötig).
+- **[`scripts/run_signal.py`](scripts/run_signal.py)** — Live-Launcher: verdrahtet
+  echten `SignalChannel` + DB + Whisper + Orchestrator, mit Vorab-Checks (Health,
+  Verknüpfung, Config) und klaren Fehlermeldungen.
+- **[`scripts/signal_debug_receive.py`](scripts/signal_debug_receive.py)** —
+  Diagnose-Tool: schneidet rohe WebSocket-Envelopes mit (war zentral fürs Debuggen).
+- **End-to-End verifiziert:** Notiz an mich → Vorschlag → „ja" → Task in
+  `data/kollege.db`.
+
+**Live-only-Bugfixes:**
+- **Note-to-Self statt fremder Nachrichten:** `_parse_envelope` verarbeitet jetzt
+  ausschließlich `syncMessage.sentMessage` an die eigene Nummer; eingehende
+  `dataMessage` anderer Personen werden bewusst ignoriert (Datensparsamkeit).
+- **Persistente WebSocket-Verbindung:** Batch-Connect/Disconnect verlor im
+  json-rpc-Modus Nachrichten in den Verbindungslücken (Bot lief, reagierte nie).
+  Verbindung wird jetzt offen gehalten und pro Poll geleert; Reconnect bei Fehler.
+- **SQLite-Thread-Safety:** Pydantic-AI führt Tools nebenläufig in Worker-Threads
+  auf einer geteilten Connection aus → `InterfaceError`/Crash. Reentranter Lock
+  (`@_synchronized`) serialisiert alle Repository-Operationen. Regressionstest mit
+  8 Threads × 25 Ops.
+- **Aktuelles Datum injiziert:** dynamischer `@agent.system_prompt` gibt heutiges
+  Datum + Wochentag; „07.07" → korrekt `2026-07-07` (vorher Raten ~Okt 2023).
+- **Doku [docs/signal-setup.md](docs/signal-setup.md):** Health = `204` korrigiert,
+  QR-als-PNG, Abschnitte „Bot starten" und „Mit Kollege reden (Note-to-Self)".
+
+**Erkanntes (noch offen, im Live-Guide §6 als Backlog):**
+- 👍-**Reaktion** (Tapback) ≠ Textnachricht → wird noch nicht als Bestätigung
+  erkannt (entspricht aber dem Design „Emoji 👍").
+- `run_forever()` ohne Error-Handling → stürzt bei unbehandelter Exception ab.
+- Geringe Beobachtbarkeit (Orchestrator loggt Empfang/Verarbeitung nicht).
+- qwen2.5:7b **über-extrahiert** (mehrere überlappende Tasks, Duplikate, `due`
+  inkonsistent) — Human-in-the-loop fängt es ab.
+
+**Entscheidung:** Phase 1 erst im Alltag stabilisieren (Live-Tests + Härtung laut
+Guide), **dann** Schritt 9 (IMAP). CI grün, 114 Tests.
+
+---
+
 ## 2026-06-30 — End-to-End-Trockenlauf (Schritt 8)
 
 **Getan:**
