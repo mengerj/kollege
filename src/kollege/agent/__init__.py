@@ -49,6 +49,12 @@ Extrahiere:
 Nutze die verfügbaren Tools direkt zum Speichern erkannter Daten.
 Falls etwas unklar ist, setze das clarification-Feld statt zu raten.
 Antworte immer auf Deutsch.
+
+Erfasse so **wenige, klar getrennte** Einträge wie möglich:
+- Lege pro echter Aufgabe **genau eine** Aufgabe an. Zerlege einen Satz nicht in
+  mehrere überlappende Aufgaben und lege **keine Duplikate** an.
+- Nur wenn wirklich mehrere unterschiedliche To-Dos genannt werden, trenne sie.
+- Im Zweifel: lieber ein Eintrag zu wenig als ein doppelter.
 """.strip()
 
 # Kein Modell bei Konstruktion: defer_model_check=True erlaubt,

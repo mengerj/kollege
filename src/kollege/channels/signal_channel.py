@@ -144,6 +144,22 @@ class SignalChannel:
         if destination != self._account:
             return None  # an einen Kontakt gesendet, kein Note-to-Self
 
+        # Tapback-Reaktion (👍 etc.) auf eine eigene Notiz: kommt als eigenes
+        # ``reaction``-Feld (kein ``message``-Text). Wir reichen das Emoji als Text
+        # mit ``is_reaction=True`` weiter; der Orchestrator wertet 👍 als „ja".
+        # ``isRemove`` = das Entfernen einer Reaktion → ignorieren.
+        reaction: dict[str, Any] | None = sent_msg.get("reaction")
+        if reaction and not reaction.get("isRemove"):
+            emoji = str(reaction.get("emoji") or "").strip()
+            if emoji:
+                return IncomingMessage(
+                    sender=sender,
+                    text=emoji,
+                    is_reaction=True,
+                    message_id=message_id,
+                )
+            return None
+
         text: str | None = sent_msg.get("message") or None
         audio_path: Path | None = None
 
