@@ -24,6 +24,12 @@ class IncomingMessage:
 
     Reaktionen werden nicht extrahiert, sondern nur im Bestätigungs-Dialog als
     👍 = „ja" gewertet (siehe Orchestrator)."""
+    quote_target_timestamp: int | None = None
+    """Wenn die Nachricht eine Signal-Zitat-Antwort (Quote-Reply) ist: Sende-Timestamp
+    der zitierten Nachricht (= ``quote.id`` im Signal-Envelope). ``None`` sonst.
+
+    Wird vom Orchestrator genutzt, um Quote-Replies auf offene Vorschläge als
+    Korrektur-Läufe zu erkennen (Schritt 8.6)."""
 
 
 @runtime_checkable
@@ -32,7 +38,15 @@ class Channel(Protocol):
 
     def receive(self) -> Iterable[IncomingMessage]: ...
 
-    def send(self, recipient: str, text: str) -> None: ...
+    def send(self, recipient: str, text: str) -> int | None:
+        """Sendet eine Nachricht und gibt ggf. den Sende-Timestamp zurück.
+
+        Der Timestamp (Millisekunden seit Epoch) wird von signal-cli bei ``/v2/send``
+        mitgeliefert. Er wird in ``PendingProposal.sent_timestamp`` gespeichert, damit
+        eingehende Quote-Replies (``quote.id``) auf den richtigen Vorschlag gematch
+        werden können. ``None``, wenn der Kanal keinen Timestamp liefert.
+        """
+        ...
 
 
 @dataclass(slots=True)
@@ -46,5 +60,6 @@ class MemoryChannel:
         while self.inbox:
             yield self.inbox.pop(0)
 
-    def send(self, recipient: str, text: str) -> None:
+    def send(self, recipient: str, text: str) -> int | None:
         self.sent.append((recipient, text))
+        return None

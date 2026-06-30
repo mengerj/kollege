@@ -5,6 +5,59 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — Schritt 8.6 — Korrektur-/Revisions-Schleife via Quote-Reply (automatische Session)
+
+**Ziel:** Zitat-Antwort (Signal Quote-Reply) auf den Vorschlag löst einen
+Revisions-Lauf aus statt eine neue Extraktion — kein Neu-Einsprechen nötig.
+
+**Getan:**
+
+- **`IncomingMessage.quote_target_timestamp`** (neues Feld, `int | None`):
+  Trägert den `quote.id`-Wert aus dem Signal-Envelope, wenn die Nachricht
+  eine Zitat-Antwort ist.
+- **`Channel.send()` gibt `int | None` zurück**: signal-cli liefert bei
+  `/v2/send` den Sende-Timestamp; der wird ab jetzt zurückgegeben und in
+  `PendingProposal.sent_timestamp` gespeichert (Vorbereitung für Stufe B).
+  `MemoryChannel` gibt `None` zurück (kein Netz).
+- **`SignalChannel._http_send()`**: parst die JSON-Response und gibt
+  `timestamp` zurück; `_parse_envelope()` extrahiert `sentMessage.quote.id`
+  in `IncomingMessage.quote_target_timestamp`.
+- **`PendingProposal.sent_timestamp`** (neues Feld): speichert den
+  Timestamp der Vorschlags-Nachricht.
+- **`run_revision()` im Agent-Layer** (`agent/__init__.py`): Thin-Wrapper,
+  der Ursprungstranskript + aktuellen Vorschlag + Korrekturtext zu einem
+  kombinierten Prompt zusammensetzt und `run_extraction()` aufruft —
+  vollständiger Primär-/Fallback-Pfad wird wiederverwendet.
+- **`Orchestrator._revise()`**: sendet Sofort-Quittung
+  (`✏️ Korrektur erhalten …` / `🎤 Sprachkorrektur …`), transkribiert ggf.
+  Audio, ruft `run_revision()` auf, aktualisiert `PendingProposal`.
+- **`Orchestrator.handle_message()`**: neue Quote-Reply-Erkennung vor dem
+  Normal-Ablauf (Stufe A: jede Zitat-Antwort bei offenem Vorschlag = Korrektur,
+  da pro Absender maximal ein Vorschlag offen ist).
+- **11 neue Tests**: Quote-Parsing in `_parse_envelope`, `send()` gibt
+  Timestamp zurück, Revisions-Lauf, Audio-Korrektur, Bestätigung nach
+  Revision, `sent_timestamp` in `PendingProposal`. Alle 148 Tests grün.
+  ruff + mypy-strict sauber.
+
+**Entscheidungen:**
+- Minimal-Matching (Stufe A): jede Quote-Reply bei offenem Vorschlag = Korrektur.
+  Kein Timestamp-Matching nötig, weil pro Absender nur ein Vorschlag offen ist.
+  Timestamp wird trotzdem gespeichert (Stufe B vorbereitet).
+- `run_revision()` nutzt denselben `run_extraction()`-Pfad mit kombiniertem Prompt —
+  kein zweites Agent-Objekt, keine doppelte Fallback-Logik.
+- YES-Text in einer Quote-Reply (z. B. zitiert + „ja") wird als Bestätigung
+  gewertet (der YES-Check kommt vor dem Quote-Check).
+- Audio-Korrektur (zitiert + Sprachnachricht): `_get_transcript()` wird aufgerufen,
+  dann wie Text-Korrektur weiterverarbeitet.
+
+**Offene Punkte / nächste Schritte:**
+- Schritt 8.7 — Bekannte Namen aus DB als LLM-Kontext mitgeben.
+- Schritt 8.9 — Robuster Dauerbetrieb (launchd, Warm-Start, Verlust-Schutz).
+- Stufe B (Korrektur bereits persistierter Einträge via Zitat-Antwort auf
+  Bestätigungs-Nachricht) — bewusst zurückgestellt.
+
+---
+
 ## 2026-06-30 — Schritt 8.8 — Sofort-Quittung (automatische Session)
 
 **Ziel:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt

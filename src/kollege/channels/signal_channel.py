@@ -83,9 +83,13 @@ class SignalChannel:
         """
         yield from self._ws_drain()
 
-    def send(self, recipient: str, text: str) -> None:
-        """Sendet eine Textnachricht an ``recipient`` via HTTP POST."""
-        self._http_send(recipient, text)
+    def send(self, recipient: str, text: str) -> int | None:
+        """Sendet eine Textnachricht an ``recipient`` via HTTP POST.
+
+        Gibt den von signal-cli zurückgelieferten Sende-Timestamp zurück
+        (Millisekunden seit Epoch) oder ``None`` wenn nicht verfügbar.
+        """
+        return self._http_send(recipient, text)
 
     def close(self) -> None:
         """Schließt die offene WebSocket-Verbindung (idempotent)."""
@@ -196,18 +200,31 @@ class SignalChannel:
         if text is None and audio_path is None:
             return None
 
+        # Quote-Reply: Signal setzt ``quote.id`` auf den Sende-Timestamp der
+        # zitierten Nachricht (= targetSentTimestamp). Daran erkennt der Orchestrator
+        # eine Korrektur-Antwort auf einen offenen Vorschlag.
+        quote_target_timestamp: int | None = None
+        quote: dict[str, Any] | None = sent_msg.get("quote")
+        if quote:
+            try:
+                ts_raw = quote.get("id")
+                quote_target_timestamp = int(ts_raw) if ts_raw else None
+            except (ValueError, TypeError):
+                pass
+
         return IncomingMessage(
             sender=sender,
             text=text,
             audio_path=audio_path,
             message_id=message_id,
+            quote_target_timestamp=quote_target_timestamp,
         )
 
     # ---------------------------------------------------------------------- #
     # Internal: HTTP send & attachment download                                #
     # ---------------------------------------------------------------------- #
 
-    def _http_send(self, recipient: str, text: str) -> None:
+    def _http_send(self, recipient: str, text: str) -> int | None:
         try:
             import httpx
         except ImportError as exc:
@@ -224,6 +241,11 @@ class SignalChannel:
         }
         response = httpx.post(f"{self._base_url}/v2/send", json=payload, timeout=10.0)
         response.raise_for_status()
+        try:
+            ts = response.json().get("timestamp")
+            return int(ts) if ts else None
+        except Exception:
+            return None
 
     def _download_attachment(self, att_id: str, content_type: str) -> Path:
         try:

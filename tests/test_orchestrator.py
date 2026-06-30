@@ -597,3 +597,162 @@ def test_no_ack_for_audio_without_transcriber(
     audio_file.write_bytes(b"data")
     orc.handle_message(IncomingMessage(sender=SENDER, audio_path=audio_file))
     assert channel.sent == []
+
+
+# ---------------------------------------------------------------------------
+# Korrektur-/Revisions-Schleife (Quote-Reply, Schritt 8.6)
+# ---------------------------------------------------------------------------
+
+
+def _result_revised() -> ExtractionResult:
+    """Revidiertes Extraktionsergebnis (z. B. korrigierter Name)."""
+    return ExtractionResult(tasks=[ExtractedTask(title="Rückruf bei Schmidt")])
+
+
+def test_quote_reply_triggers_revision(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Eine Quote-Reply bei offenem Vorschlag löst den Revisions-Lauf aus."""
+    _prime_pending(orc, channel)
+
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()) as mock_rev:
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Das ist nicht Herr Schnitt, sondern Schmidt",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+
+    mock_rev.assert_called_once()
+    # Quittung + revidierter Vorschlag
+    assert len(channel.sent) >= 2
+    texts = [t for _, t in channel.sent]
+    assert any("überarbeite" in t.lower() for t in texts)
+    assert any("Schmidt" in t for t in texts)
+    # Vorschlag noch offen (nicht persistiert)
+    assert SENDER in orc._pending
+    assert orc._pending[SENDER].result.tasks[0].title == "Rückruf bei Schmidt"
+
+
+def test_quote_reply_without_pending_is_new_note(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Quote-Reply ohne offenen Vorschlag wird wie eine neue Notiz behandelt."""
+    assert SENDER not in orc._pending
+
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()) as mock_ext:
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Irgendein zitierter Text",
+                quote_target_timestamp=9_999_999_999,
+            )
+        )
+
+    mock_ext.assert_called_once()
+    assert SENDER in orc._pending
+
+
+def test_quote_reply_yes_still_confirms(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Quote-Reply mit Text 'ja' bestätigt den Vorschlag (nicht Korrektur-Lauf)."""
+    _prime_pending(orc, channel)
+
+    with patch("kollege.orchestrator.run_revision") as mock_rev:
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="ja",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+
+    mock_rev.assert_not_called()
+    assert SENDER not in orc._pending
+    assert len(repo.query_open_items()) == 1
+
+
+def test_quote_reply_audio_uses_transcriber(
+    repo: Repository,
+    channel: MemoryChannel,
+    settings: Settings,
+    log_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """Quote-Reply mit Audio wird transkribiert, dann als Korrekturtext verwendet."""
+    audio_file = tmp_path / "correction.ogg"
+    audio_file.write_bytes(b"fake-audio")
+    stub = StubTranscriber(canned_text="Das ist nicht Schnitt sondern Schmidt")
+
+    orchestrator = Orchestrator(
+        channel=channel, repo=repo, transcriber=stub, settings=settings, log_dir=log_dir
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, text="Erste Notiz"))
+    channel.sent.clear()
+
+    revised = _result_revised()
+    with patch("kollege.orchestrator.run_revision", return_value=revised) as mock_rev:
+        orchestrator.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                audio_path=audio_file,
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+
+    mock_rev.assert_called_once()
+    call_kwargs = mock_rev.call_args
+    assert "Schmidt" in call_kwargs.kwargs.get("correction", "") or any(
+        "Schmidt" in str(a) for a in call_kwargs.args
+    )
+    assert any("Schmidt" in t for _, t in channel.sent)
+
+
+def test_quote_reply_revision_replaces_pending(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Nach dem Korrektur-Lauf ist der Pending-State aktualisiert (nicht gelöscht)."""
+    _prime_pending(orc, channel)
+    original_result = orc._pending[SENDER].result
+
+    revised = _result_revised()
+    with patch("kollege.orchestrator.run_revision", return_value=revised):
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Korrektur: Schmidt",
+                quote_target_timestamp=1_111_111_111,
+            )
+        )
+
+    assert SENDER in orc._pending
+    assert orc._pending[SENDER].result is not original_result
+    assert orc._pending[SENDER].result.tasks[0].title == "Rückruf bei Schmidt"
+
+
+def test_revised_proposal_can_be_confirmed(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Korrigierter Vorschlag lässt sich anschließend per 'ja' bestätigen."""
+    _prime_pending(orc, channel)
+
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()):
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Nicht Schnitt, sondern Schmidt",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+    assert SENDER not in orc._pending
+    tasks = repo.query_open_items()
+    assert len(tasks) == 1
+    assert tasks[0].title == "Rückruf bei Schmidt"
+
+
+def test_pending_stores_sent_timestamp(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """PendingProposal.sent_timestamp wird nach dem Senden des Vorschlags gesetzt."""
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Notiz"))
+    # MemoryChannel.send() gibt None zurück — kein Crash, Wert ist None
+    assert orc._pending[SENDER].sent_timestamp is None  # MemoryChannel liefert None

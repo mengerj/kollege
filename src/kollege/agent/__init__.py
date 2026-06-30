@@ -35,7 +35,7 @@ from kollege.models import (
     WaitingOn,
 )
 
-__all__ = ["agent", "build_model", "run_extraction"]
+__all__ = ["agent", "build_model", "run_extraction", "run_revision"]
 
 _SYSTEM_PROMPT = """
 Du bist Kollege, ein persönlicher Assistent für eine selbstständige Landschaftsarchitektin.
@@ -274,6 +274,48 @@ def _rebuild_from_repo(repo: Repository, clarification: str | None = None) -> Ex
         project_updates=extracted_updates,
         clarification=clarification,
     )
+
+
+def _format_result_for_revision(result: ExtractionResult) -> str:
+    """Aktuelles ExtractionResult als lesbaren Text für den Revisions-Prompt."""
+    lines: list[str] = []
+    for c in result.contacts:
+        lines.append(f"  - Kontakt: {c.name}")
+    for t in result.tasks:
+        due = f" (fällig: {t.due})" if t.due else ""
+        proj = f" [{t.project}]" if t.project else ""
+        lines.append(f"  - Aufgabe: {t.title}{proj}{due}")
+    for pu in result.project_updates:
+        status = f" → {pu.status}" if pu.status else ""
+        lines.append(f"  - Projekt: {pu.project}{status}")
+    return "\n".join(lines) if lines else "  (leer)"
+
+
+def run_revision(
+    original_transcript: str,
+    current_result: ExtractionResult,
+    correction: str,
+    settings: Settings,
+) -> ExtractionResult:
+    """Revidiert ein ExtractionResult anhand eines Korrekturhinweises.
+
+    Das LLM bekommt das Ursprungstranskript, den aktuellen Vorschlag und den
+    Korrekturtext. Es liefert ein überarbeitetes ExtractionResult, das erneut
+    als Vorschlag angezeigt wird (nichts wird bis zur Bestätigung persistiert).
+
+    Intern wird ``run_extraction`` auf einem zusammengesetzten Prompt aufgerufen —
+    so wird der gesamte Primär-/Fallback-Pfad wiederverwendet.
+    """
+    revision_prompt = (
+        "[KORREKTUR-LAUF]\n"
+        f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
+        f"Bisheriger Vorschlag:\n{_format_result_for_revision(current_result)}\n\n"
+        f"Korrektur:\n{correction}\n\n"
+        "Überarbeite den Vorschlag entsprechend der Korrektur. "
+        "Extrahiere das korrigierte Ergebnis vollständig."
+    )
+    tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
+    return run_extraction(revision_prompt, tmp_repo, settings)
 
 
 def run_extraction(
