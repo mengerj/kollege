@@ -12,34 +12,29 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Phase-1-Live-Stabilisierung** (vor Schritt 9). Der Signal-Bot läuft echt
-(verknüpft, End-to-End getestet). Jetzt im Alltag stabilisieren, **bevor** neue
-Kanäle dazukommen. Vollständige Einweisung + Backlog:
-[docs/live-testing-guide.md](docs/live-testing-guide.md).
+**Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns** (vor E-Mail/IMAP).
 
-Schwerpunkte (Details/Priorität im Guide §6):
-- 👍-**Reaktion** als Bestätigung erkennen (Tapback ≠ Text; entspricht Design).
-- **`run_forever()` härten** (Fehler fangen, weiterlaufen statt abstürzen).
-- **Logging** im Orchestrator (Empfang/Extraktion/Persistenz nachvollziehbar).
-- **Sprachnachrichten** end-to-end verifizieren; Über-Extraktion eindämmen.
+Der Live-Härtungs-Backlog (Guide §6) ist umgesetzt und verifiziert; technisch läuft
+der Signal-Bot End-to-End. **Bevor neue Kanäle dazukommen, muss sich der bestehende
+Kern im Alltag flüssig und vertrauenswürdig anfühlen** — genau das entscheidet über
+freiwillige Weiternutzung (Designprinzip 6), nicht zusätzliche Features. IMAP wird
+deshalb bewusst zurückgestellt (siehe unten).
 
-**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün, 👍-Bestätigung,
-Absturz-Resistenz, korrekte Datumsauflösung.
+Reihenfolge nach Wirkung auf „fühlt sich gut an" (Details in **Phase 1.5** unten):
+1. **Sofort-Quittung** (Schritt 8.8) — sonst wirkt die Cold-Start-Latenz wie „nichts
+   passiert" (genau so erlebt). Niedrigste Hürde, höchster gefühlter Gewinn.
+2. **Korrektur-/Revisions-Schleife** (Schritt 8.6) — per Signal-Zitat-Antwort den
+   offenen Vorschlag natürlichsprachig korrigieren statt neu einsprechen.
+3. **Bekannte Namen abgleichen** (Schritt 8.7) — dem Agenten die DB-Namen als
+   Kontext geben, damit verhörte Namen dem richtigen Kontakt zugeordnet werden.
+4. Danach **robuster Dauerbetrieb** (8.9) und **Eval-Set** (8.10).
 
-> **Schritt 9 (IMAP)** ist bereits auf einem **separaten Branch** angefangen.
-> Reihenfolge: diesen Live-Betrieb-PR zuerst nach `main` mergen, dann `main` in
-> den Schritt-9-Branch mergen. Schritt 9 wird erst **nach** der Stabilisierung
-> fortgeführt.
+Parallel weiter: restliche Edge-Cases der Tabelle (Guide §4) live gegenprüfen
+(explizites Datum, mehrere Tasks/Dedup, `clarification`, Teilauswahl „1 3", „nein").
 
----
-
-## Schritt 9 — IMAP read-only (t-online) *(begonnen, separater Branch)*
-
-`secureimap.t-online.de:993` SSL, strikt lesend. E-Mail-Passwort aus Config/Secrets.
-- Optionale Dependency-Gruppe `email` (`imapclient` o.ä.) in `pyproject.toml`.
-- `Channel`-ähnliches Interface oder direktes Einlesen in den Orchestrator.
-- Lazy-Import + Tests gegen Mocks; kein echter IMAP-Server im CI.
-**DoD:** Mails lesen ohne jede Schreiboperation (kein Flag/Move).
+> **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft. Der
+> begonnene Schritt-9-Branch bleibt liegen; die Reihenfolge wird neu bewertet, wenn
+> sich der Sprachnotiz-Kern flüssig anfühlt.
 
 ---
 
@@ -56,8 +51,13 @@ Absturz-Resistenz, korrekte Datumsauflösung.
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ✅ erledigt |
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ✅ erledigt |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
-| 8.5 | Signal-Live-Betrieb + Phase-1-Stabilisierung | 1 | ⏳ läuft (Live-Tests/Härtung) |
-| 9 | IMAP read-only (t-online) | 2 | 🚧 begonnen (separater Branch), pausiert |
+| 8.5 | Signal-Live-Betrieb + Härtung | 1.5 | ⏳ läuft (Live-Tests/Edge-Cases) |
+| 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ⬜ offen (geplant) |
+| 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ⬜ offen (geplant) |
+| 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ⬜ offen (geplant) |
+| 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
+| 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
+| 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
 | 12 | Statusabfragen per Chat | 2 | ⬜ offen |
@@ -160,12 +160,145 @@ Echter Signal-Trockenlauf (mit Docker + Smartphone) steht noch aus, ist aber kei
 
 ---
 
-## Phase 2 — E-Mail & Übersicht
+## Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns *(vor Phase 2)*
+
+*Ziel der Phase: Der bestehende Kern (Sprachnotiz → Vorschlag → Bestätigung → DB)
+soll sich im Alltag **flüssig, schnell genug und vertrauenswürdig** anfühlen.
+Maßstab ist nicht „mehr Features", sondern **freiwillige Weiternutzung**
+(Designprinzip 6). Erst danach kommt E-Mail (Phase 2).*
+
+### Schritt 8.5 — Signal-Live-Betrieb + Härtung ⏳
+Echter Bot verknüpft, §6-Backlog umgesetzt und live verifiziert (👍-Reaktion,
+Absturz-Resistenz, Logging, Audio-E2E, Dedup, „(kein Datum)"). Verbleibend: restliche
+Edge-Cases (Guide §4) live gegenprüfen.
+**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün im Alltag.
+
+### Schritt 8.6 — Korrektur-/Revisions-Schleife (natürlichsprachig) ⬜
+
+**Motiv.** Transkription (auch mit größeren Whisper-Modellen) und das LLM machen
+gelegentlich Fehler — typisch ein **falsch verstandener Name** („Herr Schnitt"
+statt „Schmidt") oder ein verrutschtes Datum. Statt den Vorschlag zu verwerfen und
+neu einzusprechen, soll die Nutzerin **in natürlicher Sprache korrigieren**:
+*„Das ist nicht Herr Schnitt, sondern Schmidt"* → das System aktualisiert den/die
+Einträge. Stark im Sinne der Designprinzipien (passive Erfassung, Human-in-the-loop,
+keine manuelle DB-Pflege).
+
+**Leitmechanismus — Signal-Quote-Reply (zentral, vom Nutzer gewünscht).** Wenn die
+Nutzerin **auf den Vorschlag antwortet** (Signal „Antworten"/Zitat), trägt das
+Envelope ein `quote` mit `targetSentTimestamp`. Das löst das sonst schwierige
+**Intent-Problem elegant**: eine Zitat-Antwort *auf meinen Vorschlag* ist
+eindeutig eine **Korrektur** zu genau diesem Vorschlag — kein LLM-Klassifikator
+nötig. Eine *frische* Nachricht (ohne Zitat) bleibt wie heute eine **neue Notiz**.
+
+**Stufe A — Korrektur des offenen Vorschlags (MVP, höchster Wert):**
+1. Nutzerin zitiert den Vorschlag und schreibt/spricht die Korrektur
+   („das ist nicht Herr Schnitt, sondern Schmidt"; „Datum ist Freitag").
+2. Orchestrator erkennt am `quote` → Revisions-Lauf statt neue Extraktion: das LLM
+   bekommt (Ursprungstranskript + aktuelles `ExtractionResult` + Korrekturtext) und
+   erzeugt ein revidiertes `ExtractionResult`, das **erneut als Vorschlag** gezeigt
+   wird. Nichts ist bis zur Bestätigung persistiert — risikoarm, iterierbar.
+
+**Technische Voraussetzungen (im Schritt klären):**
+- **Vorschlag-Timestamp merken:** `channel.send()` muss den Sende-Timestamp des
+  Vorschlags zurückgeben (signal-cli `/v2/send` liefert ihn), damit
+  `PendingProposal` ihn speichert und `targetSentTimestamp` darauf gematcht werden
+  kann. (Minimal-Variante ohne Match: jede Zitat-Antwort bei offenem Vorschlag =
+  Korrektur — reicht, weil pro Absender nur ein Vorschlag offen ist.)
+- **Quote-Envelope mitschneiden** (`signal_debug_receive.py`), um Feldnamen
+  (`quote.id`/`quote.author`/`quote.text`) sicher zu kennen, bevor geparst wird.
+- **Korrektur per Sprachnachricht:** Zitat-Antwort kann auch Audio sein → erst
+  transkribieren, dann als Korrekturtext verwenden (gleicher Pfad).
+
+**Stufe B — Korrektur bereits gespeicherter Einträge (später):** analog, aber die
+Zitat-Antwort zielt auf eine zuvor gesendete Bestätigung/ein Item. Erfordert eine
+Referenz auf persistierte Items (`LastPersistedBatch`), neue Repo-Methoden
+(`rename_contact`/`update_contact`, gezieltes `update_task`) **inkl. Markdown-Log-
+Konsistenz** und Merge-Semantik bei Kontakt-Umbenennung (`upsert_contact` dedupt per
+Name → „Schnitt"→„Schmidt" könnte zwei Einträge zusammenführen). Scope bewusst hinter A.
+
+**DoD (Stufe A):** Eine Zitat-Antwort auf den Vorschlag („nicht X sondern Y",
+„Datum ist Freitag") revidiert den Vorschlag sichtbar, ohne neu einsprechen zu
+müssen; Bestätigung speichert die korrigierte Fassung; eine frische Nachricht bleibt
+eine neue Notiz. Quote-Parsing + Revisions-Branch test-driven; LLM-Teil via
+`TestModel`/`FunctionModel`.
+
+### Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig statt Whisper-Prompt) ⬜
+
+**Motiv.** Whisper verhört **Eigennamen** am häufigsten („Herr Schnitt" statt
+„Schmidt"). Naheliegend wäre, die DB-Namen Whisper als `initial_prompt`-Vokabular
+mitzugeben — **verworfen**, weil dieser Hebel zu schwach ist: `initial_prompt` ist
+auf ~224 Tokens begrenzt, biast nur probabilistisch (Whisper kann trotzdem verhören)
+und hilft per Definition **nicht beim ersten Auftreten** eines neuen Namens (der noch
+nicht in der DB steht — genau dann zählt die richtige Schreibweise am meisten).
+
+**Besserer Ort: das LLM, nicht das Audio.** Der Agent bekommt das *Transkript* und
+hat ein **großes Kontextfenster** (Tausende Tokens — kein 224-Limit). Gibt man ihm
+die **bekannten Kontakt-/Projektnamen als Kontext**, kann er „Herr Schnitt" gegen die
+Liste abgleichen und „Schmidt" vorschlagen — die Bestätigung (Human-in-the-loop)
+fängt Fehlentscheidungen ohnehin ab. Das überlappt sauber mit der Korrektur-Schleife
+(8.6) und der Quote-Reply-Revision.
+
+**Ansatz.**
+- Vor der Extraktion bekannte Namen aus dem Repo laden und dem Agenten als Kontext
+  geben (System-Prompt-Anhang oder ein Tool `lookup_known_names()`); der Agent
+  normalisiert/verknüpft gegen bestehende Einträge statt blind neu anzulegen.
+- Mehrdeutigkeit → `clarification` bzw. Vorschlag mit erkennbarer Zuordnung, nie
+  stilles Überschreiben.
+- **DSGVO:** lokal (Ollama), Namen verlassen das Gerät nicht.
+
+**Grenzen / Risiken (im Schritt entscheiden).** Auch der LLM-Kontext skaliert nicht
+unbegrenzt — bei großer DB die Kandidaten **vorfiltern** (kürzlich aktiv / grobe
+Ähnlichkeit per einfachem Fuzzy-Match), statt die ganze Liste zu schicken. Gefahr des
+**Über-Korrigierens** (echter neuer „Schnitt" wird fälschlich zu „Schmidt") → im
+Zweifel nachfragen, Eval-Set (8.10) als Wächter.
+
+**DoD:** Eine Notiz, die einen bereits bekannten (leicht verhörten) Namen enthält,
+wird dem existierenden Kontakt/Projekt zugeordnet statt als neuer Eintrag angelegt;
+unbekannte Namen unverändert. Abgleich-/Vorfilter-Logik test-driven; LLM-Teil via
+`TestModel`/`FunctionModel`.
+
+### Schritt 8.8 — Sofort-Quittung / gefühlte Reaktionszeit ⬜
+Cold-Start + Whisper + LLM erzeugen spürbare Latenz; ohne Rückmeldung wirkt das wie
+„nichts passiert" (live so erlebt). Eine **knappe Sofort-Bestätigung** beim Eingang
+(z. B. „🎤 hab ich, ich verarbeite das kurz …") nimmt die Unsicherheit, bevor der
+eigentliche Vorschlag kommt. Optional: Hinweis bei ungewöhnlich langem Lauf.
+**DoD:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt wie
+gehabt. Kein Doppel-Senden mehr aus Ungeduld.
+
+### Schritt 8.9 — Robuster Dauerbetrieb ⬜
+Der Bot soll **unbeaufsichtigt** laufen und Störungen überleben:
+- Als Dienst mit **Auto-Restart** (launchd/systemd) statt manuellem `nohup`.
+- **Modell warm halten** bzw. Cold-Start abfedern (Pre-Warm beim Start; Trade-off
+  RAM beachten — vgl. ornith-Erfahrung).
+- Sauberer Umgang, wenn Ollama/Whisper/Container kurz weg sind (Meldung statt Crash).
+- **Nachrichten-Verlust bei Verbindungslücke prüfen** (beim RAM-Engpass beobachtet):
+  klären, ob signal-cli Nachrichten der Lücke nachliefert; sonst Gegenmaßnahme.
+**DoD:** Bot übersteht Neustart von Ollama/Container und einen RAM-Engpass, ohne dass
+eine Notiz still verloren geht.
+
+### Schritt 8.10 — Eval-Set für Extraktionsqualität ⬜
+Kleines Fixture-Set aus Beispiel-Transkripten → erwartete Felder (Schwellen/Smoke,
+kein striktes Assert). Macht **Modell-/Prompt-Wechsel messbar** (ornith ↔ qwen ↔ …)
+und sichert Dedup/Datumsauflösung/Vokabular-Bias (8.7) gegen Regression ab.
+Modell-agnostisch; im CI ohne echtes LLM (`TestModel`/`FunctionModel`), echte Modelle
+nur im manuellen Lauf.
+**DoD:** `make eval` o. ä. zeigt pro Modell eine Trefferquote über die Fixtures.
+
+---
+
+## Phase 2 — E-Mail & Übersicht *(zurückgestellt bis Phase 1.5 rund läuft)*
 
 *Ziel: Der Assistent beantwortet „bei wem muss ich mich melden?".*
 
-### Schritt 9 — IMAP read-only (t-online) ⬜
+> **Bewusst zurückgestellt.** Erst wenn sich der Sprachnotiz-Kern im Alltag flüssig
+> anfühlt (Phase 1.5), wird E-Mail angegangen. Der Schritt-9-Branch ist begonnen,
+> liegt aber; die Reihenfolge wird danach neu bewertet.
+
+### Schritt 9 — IMAP read-only (t-online) 🅿️ *(begonnen, separater Branch, pausiert)*
 `secureimap.t-online.de:993` SSL, strikt lesend. E-Mail-Passwort aus Config/Secrets.
+- Optionale Dependency-Gruppe `email` (`imapclient` o. ä.) in `pyproject.toml`.
+- `Channel`-ähnliches Interface oder direktes Einlesen in den Orchestrator.
+- Lazy-Import + Tests gegen Mocks; kein echter IMAP-Server im CI.
 **DoD:** Mails lesen ohne jede Schreiboperation (kein Flag/Move).
 
 ### Schritt 10 — Task-Extraktion aus E-Mail + CommunicationLog ⬜

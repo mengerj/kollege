@@ -19,6 +19,7 @@ Beenden mit Strg-C.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -55,6 +56,15 @@ def _account_linked(base_url: str, number: str) -> bool:
 
 
 def main() -> None:
+    # Logging früh konfigurieren, damit Orchestrator-Events (Eingang, Extraktion,
+    # Persistenz, Fehler) im Log sichtbar sind. Datensparsam: keine Nachrichten-
+    # inhalte, nur Metadaten (Absender, Typ, Anzahl).
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     settings = load_settings()
 
     print("=" * 60)

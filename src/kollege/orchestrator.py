@@ -15,6 +15,8 @@ Jeder Absender kann nur einen Vorschlag gleichzeitig offen haben.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import re
 import sqlite3
 import time
@@ -38,7 +40,15 @@ from kollege.models import (
 )
 from kollege.transcription import Transcriber
 
-__all__ = ["Orchestrator", "PendingProposal", "format_proposal", "persist_result"]
+__all__ = [
+    "Orchestrator",
+    "PendingProposal",
+    "dedupe_result",
+    "format_proposal",
+    "persist_result",
+]
+
+logger = logging.getLogger("kollege.orchestrator")
 
 # ---------------------------------------------------------------------------
 # Typalias für die drei möglichen Extraktionsobjekte
@@ -86,7 +96,9 @@ def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
         typ = f" ({c.type})" if c.type else ""
         items.append((f"👤 Kontakt: {c.name}{typ}", c))
     for t in result.tasks:
-        due = f", fällig: {t.due}" if t.due else ""
+        # due wird IMMER angezeigt — auch "(kein Datum)" —, damit der Nutzer ein
+        # fehlendes/falsches Datum schon VOR der Bestätigung erkennt.
+        due = f", fällig: {t.due}" if t.due else ", fällig: (kein Datum)"
         proj = f" [{t.project}]" if t.project else ""
         items.append((f"📋 Aufgabe: {t.title}{proj}{due}", t))
     for pu in result.project_updates:
@@ -98,6 +110,56 @@ def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
 def _parse_selection(text: str) -> list[int]:
     """Zahlen aus "1 2 3" oder "1,2" parsen → 0-basierte Indizes."""
     return [int(n) - 1 for n in re.findall(r"\d+", text) if int(n) >= 1]
+
+
+def _norm(s: str) -> str:
+    """Vergleichs-Normalform: getrimmt, kleingeschrieben, Mehrfach-Whitespace zu einem."""
+    return re.sub(r"\s+", " ", s.strip().lower())
+
+
+def dedupe_result(result: ExtractionResult) -> ExtractionResult:
+    """Doppelte Einträge aus einem ExtractionResult entfernen (Über-Extraktion).
+
+    Kleinere Modelle (z. B. qwen2.5:7b) zerlegen einen Satz gern in mehrere
+    überlappende, identische Einträge. Wir entfernen exakte Dubletten je
+    Kategorie und erhalten dabei die ursprüngliche Reihenfolge:
+
+    - Kontakte: gleich bei identischem Namen.
+    - Aufgaben: gleich bei identischem Titel **und** gleicher Frist (``due``).
+    - Projekt-Updates: gleich bei identischem Projektnamen.
+
+    Reine Wertkopie — das übergebene ``result`` bleibt unverändert.
+    """
+    seen_contacts: set[str] = set()
+    contacts: list[ExtractedContact] = []
+    for c in result.contacts:
+        ckey = _norm(c.name)
+        if ckey not in seen_contacts:
+            seen_contacts.add(ckey)
+            contacts.append(c)
+
+    seen_tasks: set[tuple[str, str]] = set()
+    tasks: list[ExtractedTask] = []
+    for t in result.tasks:
+        tkey = (_norm(t.title), t.due.isoformat() if t.due else "")
+        if tkey not in seen_tasks:
+            seen_tasks.add(tkey)
+            tasks.append(t)
+
+    seen_updates: set[str] = set()
+    updates: list[ExtractedProjectUpdate] = []
+    for pu in result.project_updates:
+        ukey = _norm(pu.project)
+        if ukey not in seen_updates:
+            seen_updates.add(ukey)
+            updates.append(pu)
+
+    return ExtractionResult(
+        contacts=contacts,
+        tasks=tasks,
+        project_updates=updates,
+        clarification=result.clarification,
+    )
 
 
 def format_proposal(result: ExtractionResult) -> str:
@@ -233,6 +295,24 @@ class Orchestrator:
 
     def handle_message(self, msg: IncomingMessage) -> None:
         """Eine eingehende Nachricht verarbeiten (synchron, blockierend)."""
+        kind = "Reaktion" if msg.is_reaction else ("Audio" if msg.audio_path else "Text")
+        logger.info(
+            "Eingang von %s (%s, pending=%s)",
+            msg.sender,
+            kind,
+            msg.sender in self._pending,
+        )
+
+        # Tapback-Reaktion (👍) auf einen Vorschlag = Bestätigung. Andere
+        # Reaktionen oder Reaktionen ohne offenen Vorschlag werden ignoriert
+        # (sie sind keine Sprachnotiz und sollen nicht extrahiert werden).
+        if msg.is_reaction:
+            if msg.sender in self._pending and msg.text and _YES.match(msg.text.strip()):
+                self._confirm(msg.sender, indices=None)
+            else:
+                logger.info("Reaktion ignoriert (kein 👍 auf offenen Vorschlag)")
+            return
+
         # Ist dies eine Antwort auf einen ausstehenden Vorschlag?
         if msg.sender in self._pending and msg.text:
             text = msg.text.strip()
@@ -254,15 +334,24 @@ class Orchestrator:
         if transcript is None or not transcript.strip():
             return
 
-        result = self._extract(transcript)
+        result = dedupe_result(self._extract(transcript))
 
         if result.clarification:
+            logger.info("Extraktion: Rückfrage gestellt")
             self._channel.send(msg.sender, f"Rückfrage: {result.clarification}")
             return
 
         if result.is_empty():
+            logger.info("Extraktion: nichts Konkretes erkannt")
             self._channel.send(msg.sender, "Ich konnte nichts Konkretes erkennen.")
             return
+
+        logger.info(
+            "Extraktion: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s)",
+            len(result.contacts),
+            len(result.tasks),
+            len(result.project_updates),
+        )
 
         self._pending[msg.sender] = PendingProposal(
             sender=msg.sender,
@@ -272,14 +361,37 @@ class Orchestrator:
         self._channel.send(msg.sender, format_proposal(result))
 
     def run_once(self) -> None:
-        """Alle aktuell verfügbaren Nachrichten einmalig verarbeiten."""
+        """Alle aktuell verfügbaren Nachrichten einmalig verarbeiten.
+
+        Ein Fehler bei *einer* Nachricht (z. B. Ollama-Timeout, Netzfehler)
+        beendet weder die Schleife noch den Prozess: er wird geloggt, dem
+        Absender wird eine knappe Meldung geschickt, danach geht es weiter.
+        """
         for msg in self._channel.receive():
-            self.handle_message(msg)
+            try:
+                self.handle_message(msg)
+            except Exception:
+                logger.exception("Fehler bei der Verarbeitung einer Nachricht von %s", msg.sender)
+                with contextlib.suppress(Exception):
+                    self._channel.send(
+                        msg.sender,
+                        "⚠ Bei der Verarbeitung ist ein Fehler aufgetreten. "
+                        "Bitte später noch einmal versuchen.",
+                    )
 
     def run_forever(self, poll_interval: float = 1.0) -> None:
-        """Dauerprozess: wartet kontinuierlich auf neue Nachrichten (blockiert)."""
+        """Dauerprozess: wartet kontinuierlich auf neue Nachrichten (blockiert).
+
+        Robust gegen Fehler in der Empfangs-/Poll-Schleife selbst (z. B.
+        WebSocket-Abbruch, fehlerhaftes Envelope): solche Fehler werden geloggt
+        und der nächste Poll-Zyklus startet — der Bot stürzt nicht ab.
+        """
+        logger.info("run_forever gestartet (poll_interval=%.1fs)", poll_interval)
         while True:
-            self.run_once()
+            try:
+                self.run_once()
+            except Exception:
+                logger.exception("Fehler in der Empfangs-/Poll-Schleife — fahre fort")
             time.sleep(poll_interval)
 
     # ---------------------------------------------------------------------- #
@@ -300,6 +412,7 @@ class Orchestrator:
     def _confirm(self, sender: str, indices: list[int] | None) -> None:
         proposal = self._pending.pop(sender)
         count = persist_result(proposal.result, indices, self._repo, self._log_dir)
+        logger.info("Persistiert: %d Eintrag/Einträge für %s", count, sender)
         self._channel.send(sender, f"✅ {count} Eintrag/Einträge gespeichert.")
 
     def _reject(self, sender: str) -> None:

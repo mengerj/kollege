@@ -72,6 +72,35 @@ def _note_to_self_audio(att_id: str, ts: int = 1_718_000_000_001) -> dict[str, o
     }
 
 
+def _note_to_self_reaction(
+    emoji: str, is_remove: bool = False, ts: int = 1_718_000_000_005
+) -> dict[str, object]:
+    """Tapback-Reaktion auf eine eigene Notiz (Note-to-Self)."""
+    return {
+        "envelope": {
+            "source": ACCOUNT,
+            "sourceNumber": ACCOUNT,
+            "sourceDevice": 1,
+            "timestamp": ts,
+            "syncMessage": {
+                "sentMessage": {
+                    "destination": ACCOUNT,
+                    "destinationNumber": ACCOUNT,
+                    "timestamp": ts,
+                    "message": None,
+                    "attachments": [],
+                    "reaction": {
+                        "emoji": emoji,
+                        "targetAuthorNumber": ACCOUNT,
+                        "targetSentTimestamp": ts - 1000,
+                        "isRemove": is_remove,
+                    },
+                }
+            },
+        }
+    }
+
+
 def _sent_to_other(other: str, text: str, ts: int = 1_718_000_000_003) -> dict[str, object]:
     """Nutzer schreibt an einen Kontakt — KEIN Note-to-Self, muss ignoriert werden."""
     return {
@@ -179,6 +208,22 @@ def test_parse_envelope_sent_to_other_ignored() -> None:
     ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
     data = _sent_to_other("+49170999", "Bis morgen!")
     assert ch._parse_envelope(data) is None
+
+
+def test_parse_envelope_reaction_becomes_reaction_message() -> None:
+    """Eine 👍-Tapback-Reaktion wird als is_reaction-IncomingMessage geparst."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
+    msg = ch._parse_envelope(_note_to_self_reaction("👍"))
+    assert msg is not None
+    assert msg.is_reaction is True
+    assert msg.text == "👍"
+    assert msg.sender == ACCOUNT
+
+
+def test_parse_envelope_reaction_remove_ignored() -> None:
+    """Das Entfernen einer Reaktion (isRemove) wird ignoriert."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT)
+    assert ch._parse_envelope(_note_to_self_reaction("👍", is_remove=True)) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -396,6 +441,28 @@ def test_download_attachment_uses_bin_extension_for_unknown_type(tmp_path: Path)
         result = ch._download_attachment(att_id, "application/octet-stream")
 
     assert result.suffix == ".bin"
+
+
+@pytest.mark.parametrize(
+    ("content_type", "expected"),
+    [
+        ("audio/ogg; codecs=opus", ".ogg"),
+        ("audio/aac", ".aac"),
+        ("audio/mp4", ".m4a"),
+        ("audio/mpeg", ".mp3"),
+        ("application/octet-stream", ".bin"),
+    ],
+)
+def test_download_attachment_extension_by_content_type(
+    tmp_path: Path, content_type: str, expected: str
+) -> None:
+    """Signal-Sprachnachrichten kommen als OGG (alt) oder AAC/MP4 (neu)."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+    with patch("httpx.get") as mock_get:
+        mock_get.return_value.content = b"RAW"
+        mock_get.return_value.raise_for_status = MagicMock()
+        result = ch._download_attachment("aid", content_type)
+    assert result.suffix == expected
 
 
 # --------------------------------------------------------------------------- #

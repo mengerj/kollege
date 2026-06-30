@@ -28,6 +28,7 @@ from kollege.models import (
 )
 from kollege.orchestrator import (
     Orchestrator,
+    dedupe_result,
     format_proposal,
     persist_result,
 )
@@ -143,6 +144,63 @@ def test_format_proposal_project_update() -> None:
     text = format_proposal(result)
     assert "📁 Projekt: Hausgarten" in text
     assert "planung" in text.lower()
+
+
+def test_format_proposal_task_without_due_shows_kein_datum() -> None:
+    """Eine Aufgabe ohne Frist zeigt explizit '(kein Datum)' — sichtbar VOR Bestätigung."""
+    result = ExtractionResult(tasks=[ExtractedTask(title="Ohne Frist")])
+    text = format_proposal(result)
+    assert "(kein Datum)" in text
+
+
+# ---------------------------------------------------------------------------
+# dedupe_result
+# ---------------------------------------------------------------------------
+
+
+def test_dedupe_result_removes_duplicate_tasks() -> None:
+    result = ExtractionResult(
+        tasks=[
+            ExtractedTask(title="Müller anrufen"),
+            ExtractedTask(title="  müller   anrufen "),  # nur Whitespace/Case anders
+        ]
+    )
+    deduped = dedupe_result(result)
+    assert len(deduped.tasks) == 1
+
+
+def test_dedupe_result_keeps_tasks_with_different_due() -> None:
+    result = ExtractionResult(
+        tasks=[
+            ExtractedTask(title="Anruf", due=datetime.date(2026, 7, 1)),
+            ExtractedTask(title="Anruf", due=datetime.date(2026, 7, 2)),
+        ]
+    )
+    deduped = dedupe_result(result)
+    assert len(deduped.tasks) == 2
+
+
+def test_dedupe_result_dedups_contacts_and_updates() -> None:
+    result = ExtractionResult(
+        contacts=[ExtractedContact(name="Tom"), ExtractedContact(name="tom")],
+        project_updates=[
+            ExtractedProjectUpdate(project="Park"),
+            ExtractedProjectUpdate(project="Park"),
+        ],
+    )
+    deduped = dedupe_result(result)
+    assert len(deduped.contacts) == 1
+    assert len(deduped.project_updates) == 1
+
+
+def test_dedupe_result_preserves_clarification_and_order() -> None:
+    result = ExtractionResult(
+        tasks=[ExtractedTask(title="Erste"), ExtractedTask(title="Zweite")],
+        clarification="Hinweis",
+    )
+    deduped = dedupe_result(result)
+    assert [t.title for t in deduped.tasks] == ["Erste", "Zweite"]
+    assert deduped.clarification == "Hinweis"
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +428,78 @@ def test_run_once_processes_multiple_messages(orc: Orchestrator, channel: Memory
     recipients = {r for r, _ in channel.sent}
     assert SENDER in recipients
     assert OTHER in recipients
+
+
+def test_run_once_survives_error_and_continues(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Ein Fehler bei einer Nachricht darf die Schleife nicht beenden (§6.2)."""
+    channel.inbox.append(IncomingMessage(sender=SENDER, text="kaputt"))
+    channel.inbox.append(IncomingMessage(sender=OTHER, text="ok"))
+
+    def _boom_then_ok(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        if transcript == "kaputt":
+            raise RuntimeError("Ollama-Timeout simuliert")
+        return _result_task()
+
+    with patch("kollege.orchestrator.run_extraction", side_effect=_boom_then_ok):
+        orc.run_once()
+
+    by_recipient = dict(channel.sent)
+    assert "Fehler" in by_recipient[SENDER]  # knappe Fehlermeldung an den Absender
+    assert "📋" in by_recipient[OTHER]  # zweite Nachricht wurde trotzdem verarbeitet
+
+
+# ---------------------------------------------------------------------------
+# Reaktions-Bestätigung (👍 als Tapback)
+# ---------------------------------------------------------------------------
+
+
+def test_reaction_thumbsup_confirms_pending(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    _prime_pending(orc, channel)
+    orc.handle_message(IncomingMessage(sender=SENDER, text="👍", is_reaction=True))
+    assert SENDER not in orc._pending
+    assert len(repo.query_open_items()) == 1
+
+
+def test_reaction_without_pending_is_ignored(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Eine Reaktion ohne offenen Vorschlag wird ignoriert (keine Extraktion)."""
+    with patch("kollege.orchestrator.run_extraction") as mock_extract:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="👍", is_reaction=True))
+    mock_extract.assert_not_called()
+    assert channel.sent == []
+
+
+def test_non_thumbsup_reaction_is_ignored(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Ein anderes Emoji als 👍 bestätigt nicht und löst keine Extraktion aus."""
+    _prime_pending(orc, channel)
+    with patch("kollege.orchestrator.run_extraction") as mock_extract:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="😀", is_reaction=True))
+    mock_extract.assert_not_called()
+    assert SENDER in orc._pending  # Vorschlag bleibt offen
+    assert channel.sent == []
+
+
+# ---------------------------------------------------------------------------
+# Dedup im Verarbeitungsfluss
+# ---------------------------------------------------------------------------
+
+
+def test_handle_message_dedups_overextracted_tasks(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Über-Extraktion (doppelte Tasks) wird vor dem Vorschlag entdoppelt (§6.5)."""
+    noisy = ExtractionResult(
+        tasks=[
+            ExtractedTask(title="Müller anrufen"),
+            ExtractedTask(title="Müller anrufen"),
+        ]
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=noisy):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Müller anrufen"))
+    assert len(orc._pending[SENDER].result.tasks) == 1
 
 
 # ---------------------------------------------------------------------------

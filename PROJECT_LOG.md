@@ -5,6 +5,58 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — Phase-1-Härtung + Live-Test mit ornith:9b
+
+Zweite Live-Session gemäß [docs/live-testing-guide.md](docs/live-testing-guide.md):
+den §6-Härtungs-Backlog umgesetzt, alles live durchgespielt, und einen
+Modellwechsel auf `ornith:9b` getestet.
+
+**Getan (Härtung §6):**
+- **`run_forever`/`run_once` robust:** Fehler pro Nachricht werden geloggt, der
+  Absender bekommt eine knappe Meldung, der Bot läuft weiter statt abzustürzen.
+  Auch die Empfangs-/Poll-Schleife fängt Fehler ab. (§6.2)
+- **Logging im Orchestrator:** Eingang (Absender/Typ), Extraktionsergebnis
+  (Anzahl/Rückfrage), Persistenz, Fehler — datensparsam (keine Inhalte).
+  `run_signal.py` konfiguriert `logging.basicConfig`. (§6.3)
+- **`format_proposal` zeigt `due` immer** an, auch „(kein Datum)". (§6.4)
+- **`dedupe_result`** entdoppelt über-extrahierte Einträge vor dem Vorschlag;
+  System-Prompt Richtung „wenige, klar getrennte Tasks" geschärft. (§6.5)
+- **👍-Tapback als Bestätigung:** `SignalChannel` parst das `reaction`-Feld,
+  `IncomingMessage.is_reaction`, Orchestrator wertet 👍 auf offenen Vorschlag als
+  „ja". **Live verifiziert** (Log: `Eingang … (Reaktion) → Persistiert`). (§6.1)
+- **Audio-Anhang-Endung:** neuere Signal-Clients senden AAC/MP4 statt OGG;
+  `_download_attachment` leitet die Endung aus dem contentType ab.
+
+**Live verifiziert (Definition of Done §8):**
+- Text-Notiz → Vorschlag → Bestätigung → korrekter DB-Eintrag (Kontakt+Task,
+  Datum, Verknüpfung). ✓
+- 👍-Reaktion bestätigt zuverlässig. ✓
+- Sprachnachricht → Whisper-Transkript → Vorschlag (erstes Audio lädt
+  `faster-whisper-medium`, ~4 Min einmalig). ✓
+- Datumsauflösung „morgen"/„übermorgen" korrekt. ✓
+
+**Modell `ornith:9b` (Erkenntnisse):**
+- Tool-fähig, Extraktion korrekt (Datum, Verknüpfung, **keine** Über-Extraktion).
+- **Ollama-Update nötig:** ornith:9b verlangt > 0.30.8; Server (Ollama.app) lief
+  auf 0.30.8 → via Homebrew auf **0.30.11** gehoben, App-Server gestoppt, brew
+  `ollama serve` gestartet. (Nach Reboot kommt die Ollama.app zurück — ggf. App
+  selbst updaten.)
+- **Speed-Diagnose:** warm 16 tok/s, 100 % GPU, passt in VRAM (5,3 GB) — flott.
+  Die langen Wartezeiten (~3–8 Min) sind **Cold-Starts**: bei RAM-Druck (~1 GB
+  frei) entlädt Ollama das Modell zwischen Nachrichten, der Reload dauert ~3 Min
+  (verschärft, wenn Whisper gleichzeitig lädt).
+- **`think:false` wirkungslos:** ornith ist ein Coding-Modell mit intrinsischem
+  Reasoning (raw `{{ .Prompt }}`-Template); der Ollama-Think-Flag unterdrückt es
+  nicht (Prompt-Instruktion senkt es nur ~40 %). Thinking ist ohnehin nicht der
+  Engpass. Entscheidung: **so lassen** (Korrektheit top, erste Nachricht geduldig
+  abwarten), kein Speed-Code.
+
+**Offen / Notiz:** RAM ist die eigentliche Grenze für ornith:9b auf diesem Laptop;
+bei Instabilität Fallback `qwen2.5:7b-instruct` (Dedup fängt dessen Über-Extraktion
+ab). Reaktions-Confirm für Auswahl (nur 👍 = „alles") — Teilauswahl weiter per Text.
+
+---
+
 ## 2026-06-30 — Signal-Live-Inbetriebnahme (Schritt 6/7 gehärtet)
 
 Erste **echte** Verknüpfung mit Signal und End-to-End-Test mit dem Live-Bot

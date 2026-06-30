@@ -19,6 +19,11 @@ class IncomingMessage:
     text: str | None = None
     audio_path: Path | None = None
     message_id: str | None = None
+    is_reaction: bool = False
+    """True, wenn ``text`` aus einer Signal-Tapback-Reaktion (Emoji) stammt.
+
+    Reaktionen werden nicht extrahiert, sondern nur im Bestätigungs-Dialog als
+    👍 = „ja" gewertet (siehe Orchestrator)."""
 
 
 @runtime_checkable
