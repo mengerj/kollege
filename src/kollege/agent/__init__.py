@@ -23,11 +23,13 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from kollege.config import LLMProvider, Settings
 from kollege.db.repository import Repository
 from kollege.models import (
+    Contact,
     ContactType,
     ExtractedContact,
     ExtractedProjectUpdate,
     ExtractedTask,
     ExtractionResult,
+    Project,
     ProjectStatus,
     Task,
     TaskSource,
@@ -35,7 +37,80 @@ from kollege.models import (
     WaitingOn,
 )
 
-__all__ = ["agent", "build_model", "run_extraction", "run_revision"]
+__all__ = [
+    "agent",
+    "build_known_names_context",
+    "build_model",
+    "filter_known_names",
+    "get_known_names_context",
+    "run_extraction",
+    "run_revision",
+]
+
+_MAX_KNOWN_NAMES = 80
+
+
+def filter_known_names(
+    contacts: list[Contact],
+    projects: list[Project],
+    max_names: int = _MAX_KNOWN_NAMES,
+) -> tuple[list[str], list[str]]:
+    """Bekannte Kontakt- und Projektnamen vorfiltern.
+
+    Sortiert nach ``updated_at`` absteigend (kürzlich aktiv → zuerst) und
+    begrenzt auf ``max_names // 2`` je Kategorie, damit der Kontext nicht
+    unbegrenzt wächst. Verhindert Kontext-Überschwemmung bei großer DB.
+    """
+    half = max(1, max_names // 2)
+    sorted_contacts = sorted(contacts, key=lambda c: c.updated_at, reverse=True)
+    sorted_projects = sorted(projects, key=lambda p: p.updated_at, reverse=True)
+    return [c.name for c in sorted_contacts[:half]], [p.title for p in sorted_projects[:half]]
+
+
+def build_known_names_context(
+    contact_names: list[str],
+    project_names: list[str],
+) -> str:
+    """Formatiert bekannte Namen als Kontext-Block für den Agenten.
+
+    Gibt einen leeren String zurück, wenn beide Listen leer sind.
+    Der Block wird dem Transkript vorangestellt und weist den Agenten an,
+    Namen aus dem Transkript gegen die Liste abzugleichen (Whisper-Verhörer
+    wie „Herr Schnitt" → „Schmidt" können so ohne Revisions-Schleife
+    korrigiert werden).
+    """
+    if not contact_names and not project_names:
+        return ""
+    lines: list[str] = [
+        "[BEKANNTE NAMEN — nur zur Normalisierung, nicht als neue Einträge extrahieren]",
+    ]
+    if contact_names:
+        lines.append("Kontakte: " + ", ".join(contact_names))
+    if project_names:
+        lines.append("Projekte: " + ", ".join(project_names))
+    lines.append(
+        "Gleiche Namen im Transkript mit dieser Liste ab: "
+        "Falls ein Name einem bekannten Namen stark ähnelt (z. B. »Herr Schnitt« → »Schmidt«), "
+        "verwende den bekannten Namen. "
+        "Bei echter Mehrdeutigkeit: clarification-Feld setzen statt zu raten. "
+        "Unbekannte Namen einfach so übernehmen."
+    )
+    return "\n".join(lines)
+
+
+def get_known_names_context(
+    repo: Repository,
+    max_names: int = _MAX_KNOWN_NAMES,
+) -> str:
+    """Bekannte Namen aus dem Repository laden und als Kontext-String formatieren.
+
+    Gibt einen leeren String zurück, wenn das Repository leer ist.
+    """
+    contacts = repo.get_all_contacts()
+    projects = repo.get_all_projects()
+    c_names, p_names = filter_known_names(contacts, projects, max_names)
+    return build_known_names_context(c_names, p_names)
+
 
 _SYSTEM_PROMPT = """
 Du bist Kollege, ein persönlicher Assistent für eine selbstständige Landschaftsarchitektin.
@@ -296,6 +371,7 @@ def run_revision(
     current_result: ExtractionResult,
     correction: str,
     settings: Settings,
+    known_names_context: str | None = None,
 ) -> ExtractionResult:
     """Revidiert ein ExtractionResult anhand eines Korrekturhinweises.
 
@@ -304,7 +380,8 @@ def run_revision(
     als Vorschlag angezeigt wird (nichts wird bis zur Bestätigung persistiert).
 
     Intern wird ``run_extraction`` auf einem zusammengesetzten Prompt aufgerufen —
-    so wird der gesamte Primär-/Fallback-Pfad wiederverwendet.
+    so wird der gesamte Primär-/Fallback-Pfad wiederverwendet, inklusive
+    Namensabgleich via ``known_names_context``.
     """
     revision_prompt = (
         "[KORREKTUR-LAUF]\n"
@@ -315,26 +392,38 @@ def run_revision(
         "Extrahiere das korrigierte Ergebnis vollständig."
     )
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
-    return run_extraction(revision_prompt, tmp_repo, settings)
+    return run_extraction(
+        revision_prompt, tmp_repo, settings, known_names_context=known_names_context
+    )
 
 
 def run_extraction(
     transcript: str,
     repo: Repository,
     settings: Settings,
+    known_names_context: str | None = None,
 ) -> ExtractionResult:
     """Extraktion aus Transkript synchron ausführen (Produktions-Pfad).
 
     Primär-Pfad: Modell gibt ``ExtractionResult`` via ``final_result``-Tool zurück.
     Fallback: Modell speichert via Domain-Tools in ``repo``, ExtractionResult wird
     aus dem DB-Zustand rekonstruiert (für kleinere lokale Modelle wie qwen2.5:7b).
+
+    ``known_names_context``: Bekannte Kontakt-/Projektnamen aus dem Repository,
+    formatiert via ``build_known_names_context()``. Wird dem Transkript vorangestellt,
+    damit das LLM Whisper-Verhörer erkennen und normalisieren kann.
     """
     model = build_model(settings)
+
+    # Bekannte Namen dem Transkript voranstellen (nur wenn nicht leer).
+    augmented = transcript
+    if known_names_context:
+        augmented = f"{known_names_context}\n\n[NOTIZ]\n{transcript}"
 
     # Primär-Pfad: Tool-Output-Modus (ExtractionResult als final_result-Tool).
     # Wird von TestModel/FunctionModel im CI genutzt und von starken Modellen.
     try:
-        result = agent.run_sync(transcript, model=model, deps=repo, retries=1)
+        result = agent.run_sync(augmented, model=model, deps=repo, retries=1)
         return result.output
     except (UnexpectedModelBehavior, sqlite3.DatabaseError):
         pass
@@ -344,7 +433,7 @@ def run_extraction(
     fallback_conn = sqlite3.connect(":memory:", check_same_thread=False)
     fallback_repo = Repository(fallback_conn)
     text_result = agent.run_sync(
-        transcript, model=model, deps=fallback_repo, output_type=str, retries=3
+        augmented, model=model, deps=fallback_repo, output_type=str, retries=3
     )
     text_output: str = text_result.output
     # Wenn nichts gespeichert wurde, könnte es eine Rückfrage sein.

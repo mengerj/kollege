@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kollege.agent import run_extraction, run_revision
+from kollege.agent import get_known_names_context, run_extraction, run_revision
 from kollege.channels import Channel, IncomingMessage
 from kollege.config import Settings
 from kollege.db import Repository
@@ -425,9 +425,14 @@ class Orchestrator:
         return msg.text
 
     def _extract(self, transcript: str) -> ExtractionResult:
-        """Agent gegen temporäres In-Memory-Repo — kein echter DB-Schreibzugriff."""
+        """Agent gegen temporäres In-Memory-Repo — kein echter DB-Schreibzugriff.
+
+        Bekannte Kontakt-/Projektnamen aus dem echten Repository werden dem
+        Transkript vorangestellt, damit das LLM Whisper-Verhörer normalisieren kann.
+        """
         tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
-        return run_extraction(transcript, tmp_repo, self._settings)
+        known_names = get_known_names_context(self._repo)
+        return run_extraction(transcript, tmp_repo, self._settings, known_names_context=known_names)
 
     def _confirm(self, sender: str, indices: list[int] | None) -> None:
         proposal = self._pending.pop(sender)
@@ -463,6 +468,7 @@ class Orchestrator:
 
         proposal = self._pending[sender]
         logger.info("Korrektur-Lauf für %s: %r", sender, correction_text[:80])
+        known_names = get_known_names_context(self._repo)
         try:
             revised = dedupe_result(
                 run_revision(
@@ -470,6 +476,7 @@ class Orchestrator:
                     current_result=proposal.result,
                     correction=correction_text,
                     settings=self._settings,
+                    known_names_context=known_names,
                 )
             )
         except Exception:

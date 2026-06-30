@@ -5,6 +5,67 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig, automatische Session)
+
+**Ziel:** Bekannte Kontakt- und Projektnamen aus der DB dem Agenten als Kontext
+mitgeben, damit Whisper-Verhörer (z. B. „Herr Schnitt" → „Schmidt") schon bei
+der Extraktion erkannt und normalisiert werden — ohne den Revisions-Schritt
+bemühen zu müssen.
+
+**Getan:**
+
+- **`filter_known_names(contacts, projects, max_names=80)`**: Filtert bekannte
+  Kontakt- und Projektnamen aus DB-Einträgen vor. Sortiert nach `updated_at`
+  absteigend (kürzlich aktiv zuerst), begrenzt auf `max_names // 2` je Kategorie.
+  Verhindert Kontext-Überschwemmung bei wachsender DB.
+- **`build_known_names_context(contact_names, project_names)`**: Formatiert die
+  gefilterten Namen als `[BEKANNTE NAMEN …]`-Block mit Normalisierungsanweisung an
+  das LLM. Gibt leeren String zurück, wenn beide Listen leer sind.
+- **`get_known_names_context(repo, max_names=80)`**: Kombiniert beide Funktionen —
+  liest aus dem Repository und liefert den fertigen Kontext-String.
+- **`run_extraction(..., known_names_context: str | None = None)`**: Neuer optionaler
+  Parameter. Wenn nicht leer, wird der Kontext-Block dem Transkript mit `[NOTIZ]`-
+  Separator vorangestellt, bevor der Agent aufgerufen wird. Primär- und Fallback-Pfad
+  verwenden denselben augmentierten Text.
+- **`run_revision(..., known_names_context: str | None = None)`**: Parameter
+  durchgereicht an `run_extraction()`, damit auch der Korrektur-Lauf (Schritt 8.6)
+  die bekannten Namen kennt.
+- **`Orchestrator._extract()`**: Ruft nun `get_known_names_context(self._repo)` auf
+  und übergibt den Kontext an `run_extraction()`. Das echte Repo wird gelesen, der
+  Agent arbeitet weiterhin auf dem temporären In-Memory-Repo.
+- **`Orchestrator._revise()`**: Analog — `get_known_names_context(self._repo)`
+  und Weitergabe an `run_revision()`.
+- **16 neue Tests** in [`tests/test_known_names.py`](tests/test_known_names.py):
+  - `filter_known_names`: leere Liste, Untergrenze, Max-Limit, Sortierreihenfolge.
+  - `build_known_names_context`: leer, nur Kontakte, nur Projekte, beides, Normalisierungshinweis.
+  - `get_known_names_context`: leeres Repo, Repo mit Daten.
+  - `run_extraction`: ohne Kontext, mit Kontext (Prompt-Injektion prüfen via FunctionModel),
+    leerer Kontext (kein Wrapper).
+  - Orchestrator-Integration: bekannter Kontakt landet im `known_names_context`-Argument;
+    leeres Repo → kein Kontext.
+- **164 Tests grün**, ruff + mypy-strict sauber.
+
+**Entscheidungen:**
+- **Prompt-Injektion statt Tool:** Bekannte Namen als Präambel des Transkripts, nicht als
+  separates `lookup_known_names()`-Tool. Einfacher, kein zusätzlicher Tool-Aufruf nötig,
+  das LLM kann die Liste direkt beim Lesen des Transkripts nutzen.
+- **Max 80 Namen (40 Kontakte + 40 Projekte):** Reicht für den Alltag; bei Wachstum
+  der DB werden die kürzlich aktiven priorisiert. Der Wert ist konfigurierbar über
+  `max_names`-Parameter.
+- **Leerer Kontext → kein Wrapper:** Wenn das Repo leer ist (Erstbetrieb), bleibt das
+  Transkript exakt wie bisher — kein struktureller Overhead für leere Listen.
+- **DSGVO:** Namen verlassen das Gerät nicht (Ollama lokal). Der Block heißt explizit
+  „nur zur Normalisierung, nicht als neue Einträge extrahieren" — verhindert, dass das
+  LLM DB-Namen als neue Tasks interpretiert.
+
+**Offene Punkte / nächste Schritte:**
+- Schritt 8.9 — Robuster Dauerbetrieb (launchd, Warm-Start, Verlust-Schutz).
+- Schritt 8.10 — Eval-Set für Extraktionsqualität.
+- Live-Verifikation des Namensabgleichs (erst wenn „Herr Schnitt" / ähnliches im
+  Alltag auftaucht).
+
+---
+
 ## 2026-06-30 — Schritt 8.6 — Korrektur-/Revisions-Schleife via Quote-Reply (automatische Session)
 
 **Ziel:** Zitat-Antwort (Signal Quote-Reply) auf den Vorschlag löst einen
