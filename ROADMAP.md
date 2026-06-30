@@ -23,10 +23,10 @@ deshalb bewusst zurückgestellt (siehe unten).
 Reihenfolge nach Wirkung auf „fühlt sich gut an" (Details in **Phase 1.5** unten):
 1. **Sofort-Quittung** (Schritt 8.8) — sonst wirkt die Cold-Start-Latenz wie „nichts
    passiert" (genau so erlebt). Niedrigste Hürde, höchster gefühlter Gewinn.
-2. **Korrektur-/Revisions-Schleife** (Schritt 8.6) — Transkriptions-/Namensfehler
-   natürlichsprachig beheben statt neu einsprechen.
-3. **DB-Vokabular für die Transkription** (Schritt 8.7) — bekannte Kontakt-/
-   Projektnamen als Whisper-`initial_prompt`, damit Namen seltener falsch ankommen.
+2. **Korrektur-/Revisions-Schleife** (Schritt 8.6) — per Signal-Zitat-Antwort den
+   offenen Vorschlag natürlichsprachig korrigieren statt neu einsprechen.
+3. **Bekannte Namen abgleichen** (Schritt 8.7) — dem Agenten die DB-Namen als
+   Kontext geben, damit verhörte Namen dem richtigen Kontakt zugeordnet werden.
 4. Danach **robuster Dauerbetrieb** (8.9) und **Eval-Set** (8.10).
 
 Parallel weiter: restliche Edge-Cases der Tabelle (Guide §4) live gegenprüfen
@@ -53,7 +53,7 @@ Parallel weiter: restliche Edge-Cases der Tabelle (Guide §4) live gegenprüfen
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
 | 8.5 | Signal-Live-Betrieb + Härtung | 1.5 | ⏳ läuft (Live-Tests/Edge-Cases) |
 | 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ⬜ offen (geplant) |
-| 8.7 | DB-Vokabular für Transkription (Whisper `initial_prompt`) | 1.5 | ⬜ offen (geplant) |
+| 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ⬜ offen (geplant) |
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ⬜ offen (geplant) |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
@@ -183,74 +183,79 @@ neu einzusprechen, soll die Nutzerin **in natürlicher Sprache korrigieren**:
 Einträge. Stark im Sinne der Designprinzipien (passive Erfassung, Human-in-the-loop,
 keine manuelle DB-Pflege).
 
-**Zwei Korrektur-Zeitpunkte (getrennt schneiden):**
-- **A — vor der Bestätigung (MVP, höchster Wert):** Solange ein `PendingProposal`
-  offen ist, wird eine Korrektur-Antwort nicht als neue Notiz behandelt, sondern
-  **revidiert den bestehenden Vorschlag**. Ein „Revisions-Lauf" bekommt
-  (Ursprungstranskript + aktuelles `ExtractionResult` + Korrekturtext) und erzeugt
-  ein neues `ExtractionResult`, das erneut als Vorschlag gezeigt wird. Nichts ist
-  bis dahin persistiert — risikoarm.
-- **B — nach der Bestätigung (später):** Korrektur an bereits gespeicherten
-  Einträgen. Erfordert eine Referenz auf die zuletzt persistierten Items pro
-  Absender (analog `PendingProposal`, z. B. `LastPersistedBatch`), neue
-  Repository-Methoden (`rename_contact`/`update_contact`, gezieltes `update_task`)
-  **inkl. Markdown-Log-Konsistenz**, und Auflösung von Mehrdeutigkeit („welcher
-  Schmidt?").
+**Leitmechanismus — Signal-Quote-Reply (zentral, vom Nutzer gewünscht).** Wenn die
+Nutzerin **auf den Vorschlag antwortet** (Signal „Antworten"/Zitat), trägt das
+Envelope ein `quote` mit `targetSentTimestamp`. Das löst das sonst schwierige
+**Intent-Problem elegant**: eine Zitat-Antwort *auf meinen Vorschlag* ist
+eindeutig eine **Korrektur** zu genau diesem Vorschlag — kein LLM-Klassifikator
+nötig. Eine *frische* Nachricht (ohne Zitat) bleibt wie heute eine **neue Notiz**.
 
-**Kernproblem — Intent-Erkennung.** Bei offenem Vorschlag muss eine freie Textantwort
-zuverlässig klassifiziert werden als **(a) Bestätigung**, **(b) Ablehnung**,
-**(c) Korrektur des Vorschlags** oder **(d) komplett neue Notiz**. Heute fällt alles
-außer ja/nein/Zahlen in „neue Notiz". Optionen: kleiner LLM-Klassifikator
-(zuverlässig, aber Latenz/Modellqualität — vgl. ornith-Cold-Start) oder Heuristik
-+ Rückfrage bei Unsicherheit (Designprinzip 3: im Zweifel nachfragen).
+**Stufe A — Korrektur des offenen Vorschlags (MVP, höchster Wert):**
+1. Nutzerin zitiert den Vorschlag und schreibt/spricht die Korrektur
+   („das ist nicht Herr Schnitt, sondern Schmidt"; „Datum ist Freitag").
+2. Orchestrator erkennt am `quote` → Revisions-Lauf statt neue Extraktion: das LLM
+   bekommt (Ursprungstranskript + aktuelles `ExtractionResult` + Korrekturtext) und
+   erzeugt ein revidiertes `ExtractionResult`, das **erneut als Vorschlag** gezeigt
+   wird. Nichts ist bis zur Bestätigung persistiert — risikoarm, iterierbar.
 
-**Technischer Hebel — Signal-Quote-Reply.** Wenn die Nutzerin **auf eine bestimmte
-Nachricht antwortet** (Zitat-Reply), enthält das Envelope ein `quote` mit
-`targetSentTimestamp`. Damit ließe sich eine Korrektur **eindeutig** einem Vorschlag
-(bzw. später einem gespeicherten Item) zuordnen — robuster als reine Intent-Heuristik.
-Vor Umsetzung: echte Quote-Struktur mit `signal_debug_receive.py` mitschneiden.
+**Technische Voraussetzungen (im Schritt klären):**
+- **Vorschlag-Timestamp merken:** `channel.send()` muss den Sende-Timestamp des
+  Vorschlags zurückgeben (signal-cli `/v2/send` liefert ihn), damit
+  `PendingProposal` ihn speichert und `targetSentTimestamp` darauf gematcht werden
+  kann. (Minimal-Variante ohne Match: jede Zitat-Antwort bei offenem Vorschlag =
+  Korrektur — reicht, weil pro Absender nur ein Vorschlag offen ist.)
+- **Quote-Envelope mitschneiden** (`signal_debug_receive.py`), um Feldnamen
+  (`quote.id`/`quote.author`/`quote.text`) sicher zu kennen, bevor geparst wird.
+- **Korrektur per Sprachnachricht:** Zitat-Antwort kann auch Audio sein → erst
+  transkribieren, dann als Korrekturtext verwenden (gleicher Pfad).
 
-**Offene Entscheidungen:** Intent per LLM vs. Heuristik+Rückfrage; Quote-Reply als
-Pflicht oder optionaler Hebel; Kontakt-Umbenennung mit Merge-Semantik
-(`upsert_contact` dedupt per Name → „Schnitt"→„Schmidt" könnte zwei Einträge
-zusammenführen); Scope strikt auf A halten (Scope-Creep-Risiko, vgl. CLAUDE.md).
+**Stufe B — Korrektur bereits gespeicherter Einträge (später):** analog, aber die
+Zitat-Antwort zielt auf eine zuvor gesendete Bestätigung/ein Item. Erfordert eine
+Referenz auf persistierte Items (`LastPersistedBatch`), neue Repo-Methoden
+(`rename_contact`/`update_contact`, gezieltes `update_task`) **inkl. Markdown-Log-
+Konsistenz** und Merge-Semantik bei Kontakt-Umbenennung (`upsert_contact` dedupt per
+Name → „Schnitt"→„Schmidt" könnte zwei Einträge zusammenführen). Scope bewusst hinter A.
 
-**DoD (Stufe A):** Bei offenem Vorschlag korrigiert eine natürlichsprachige Antwort
-(„nicht X sondern Y", „Datum ist Freitag") den Vorschlag sichtbar, ohne neu
-einsprechen zu müssen; Bestätigung speichert die korrigierte Fassung. Deterministische
-Teile (Intent-Branching, Revisions-Merge) test-driven; LLM-Teile via
+**DoD (Stufe A):** Eine Zitat-Antwort auf den Vorschlag („nicht X sondern Y",
+„Datum ist Freitag") revidiert den Vorschlag sichtbar, ohne neu einsprechen zu
+müssen; Bestätigung speichert die korrigierte Fassung; eine frische Nachricht bleibt
+eine neue Notiz. Quote-Parsing + Revisions-Branch test-driven; LLM-Teil via
 `TestModel`/`FunctionModel`.
 
-### Schritt 8.7 — DB-Vokabular für die Transkription (Whisper `initial_prompt`) ⬜
+### Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig statt Whisper-Prompt) ⬜
 
 **Motiv.** Whisper verhört **Eigennamen** am häufigsten („Herr Schnitt" statt
-„Schmidt"). `faster-whisper.transcribe(initial_prompt=…)` biast den Decoder Richtung
-vorgegebener Schreibweisen — ideal, um **bekannte Namen aus der eigenen DB** als
-Vokabular mitzugeben. Die Namen, die im Alltag vorkommen, stehen ja längst als
-Kontakte/Projekte in der Datenbank.
+„Schmidt"). Naheliegend wäre, die DB-Namen Whisper als `initial_prompt`-Vokabular
+mitzugeben — **verworfen**, weil dieser Hebel zu schwach ist: `initial_prompt` ist
+auf ~224 Tokens begrenzt, biast nur probabilistisch (Whisper kann trotzdem verhören)
+und hilft per Definition **nicht beim ersten Auftreten** eines neuen Namens (der noch
+nicht in der DB steht — genau dann zählt die richtige Schreibweise am meisten).
+
+**Besserer Ort: das LLM, nicht das Audio.** Der Agent bekommt das *Transkript* und
+hat ein **großes Kontextfenster** (Tausende Tokens — kein 224-Limit). Gibt man ihm
+die **bekannten Kontakt-/Projektnamen als Kontext**, kann er „Herr Schnitt" gegen die
+Liste abgleichen und „Schmidt" vorschlagen — die Bestätigung (Human-in-the-loop)
+fängt Fehlentscheidungen ohnehin ab. Das überlappt sauber mit der Korrektur-Schleife
+(8.6) und der Quote-Reply-Revision.
 
 **Ansatz.**
-- Quelle: Kontaktnamen + Projektnamen (später ggf. Orts-/Gemeindenamen) aus dem
-  Repository, zu einem knappen Hinweis-String zusammengesetzt
-  (z. B. „Namen: Schmidt, Familie Müller, Naturpark, Stadtpark").
-- **Architektur entkoppelt lassen:** das `Transcriber`-Protocol um einen optionalen
-  Hinweis-Parameter erweitern (`transcribe(path, *, vocabulary: str | None = None)`);
-  den String baut der **Orchestrator** (hat das Repo) und reicht ihn durch.
-  `StubTranscriber` ignoriert ihn → Tests bleiben netz-/modellfrei.
-- **DSGVO:** Whisper läuft lokal, die Namen verlassen das Gerät nicht — konsistent
-  mit Datensparsamkeit.
+- Vor der Extraktion bekannte Namen aus dem Repo laden und dem Agenten als Kontext
+  geben (System-Prompt-Anhang oder ein Tool `lookup_known_names()`); der Agent
+  normalisiert/verknüpft gegen bestehende Einträge statt blind neu anzulegen.
+- Mehrdeutigkeit → `clarification` bzw. Vorschlag mit erkennbarer Zuordnung, nie
+  stilles Überschreiben.
+- **DSGVO:** lokal (Ollama), Namen verlassen das Gerät nicht.
 
-**Grenzen / Risiken (im Schritt entscheiden).**
-- `initial_prompt` ist **tokenbegrenzt** (~224 Tokens). Für eine Einzelnutzerin lange
-  unkritisch; bei wachsender DB kuratieren (z. B. nur kürzlich aktive Kontakte) und
-  hart begrenzen, statt alles zu dumpen.
-- **Überbiasing** kann Whisper dazu bringen, Prompt-Wörter zu *halluzinieren* →
-  kurze, kuratierte Liste, kein Volltext; mit dem Eval-Set (8.10) absichern.
+**Grenzen / Risiken (im Schritt entscheiden).** Auch der LLM-Kontext skaliert nicht
+unbegrenzt — bei großer DB die Kandidaten **vorfiltern** (kürzlich aktiv / grobe
+Ähnlichkeit per einfachem Fuzzy-Match), statt die ganze Liste zu schicken. Gefahr des
+**Über-Korrigierens** (echter neuer „Schnitt" wird fälschlich zu „Schmidt") → im
+Zweifel nachfragen, Eval-Set (8.10) als Wächter.
 
-**DoD:** Eine Sprachnotiz mit einem Namen, der in der DB steht, wird zuverlässiger
-korrekt transkribiert als ohne Hinweis; ohne DB-Treffer unverändertes Verhalten.
-Test: Orchestrator baut den Hinweis deterministisch aus dem Repo; Transcriber-Mock
-prüft die Übergabe.
+**DoD:** Eine Notiz, die einen bereits bekannten (leicht verhörten) Namen enthält,
+wird dem existierenden Kontakt/Projekt zugeordnet statt als neuer Eintrag angelegt;
+unbekannte Namen unverändert. Abgleich-/Vorfilter-Logik test-driven; LLM-Teil via
+`TestModel`/`FunctionModel`.
 
 ### Schritt 8.8 — Sofort-Quittung / gefühlte Reaktionszeit ⬜
 Cold-Start + Whisper + LLM erzeugen spürbare Latenz; ohne Rückmeldung wirkt das wie
