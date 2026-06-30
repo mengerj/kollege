@@ -12,14 +12,14 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 7 — Orchestrator + Bestätigungs-Loop.**
-`kollege/orchestrator.py`: verdrahtet Channel → (Audio→Transcriber) → Agent →
-Repository/Logs → Bestätigungsfrage zurück.
-- **Bestätigungs-UX:** Emoji-Reaktion (👍) als Standard, nummerierte Auswahl
-  bei mehreren Optionen. Erfordert Pending-State (Vorschlag ↔ `message_id`) und
-  Verarbeitung eingehender Reaktionen.
-- Async-Architektur (Listener-Dauerprozess) festlegen.
-**DoD:** Vorschlag → Nutzerbestätigung → erst dann Persistenz; abgelehnt → verworfen.
+**Schritt 8 — End-to-End-Trockenlauf (Fake-Projekte).**
+Komplettkette mit Jos eigenem Signal-Konto und Fake-Projekten, lokalem LLM.
+- `docker compose up -d` → `signal-cli-rest-api` als Linked Device.
+- `ollama pull qwen2.5:7b-instruct` sicherstellen.
+- ffmpeg installieren (OGG/Opus → WAV für Whisper).
+- Manuelle Sprachnotiz → Signal → Whisper → Extraktion → Bestätigungsdialog → DB.
+- Beobachtungen + Qualitätsbewertung im Log festhalten.
+**DoD:** „Signal → Whisper → Extraktion → DB → Bestätigung sauber?" dokumentiert beantwortet.
 
 ---
 
@@ -34,8 +34,8 @@ Repository/Logs → Bestätigungsfrage zurück.
 | 4 | Pydantic-AI-Agent + Tools (Ollama) | 1 | ✅ erledigt |
 | 5 | Transkriptions-Backend wählen & implementieren | 1 | ✅ erledigt |
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ✅ erledigt |
-| 7 | Orchestrator + Bestätigungs-Loop | 1 | ⏳ als Nächstes |
-| 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ⬜ offen |
+| 7 | Orchestrator + Bestätigungs-Loop | 1 | ✅ erledigt |
+| 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ⏳ als Nächstes |
 | 9 | IMAP read-only (t-online) | 2 | ⬜ offen |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -122,7 +122,7 @@ implementiert (Empfang via WebSocket, Senden via POST, Audio-Download).
 - **Test:** 14 Tests gegen Mocks; echter Container nur manuell.
 **DoD:** ✅ Text + Sprachnachricht empfangen und Antwort senden (gegen Mocks); 83 Tests grün.
 
-### Schritt 7 — Orchestrator + Bestätigungs-Loop ⬜
+### Schritt 7 — Orchestrator + Bestätigungs-Loop ✅
 `kollege/orchestrator.py`: verdrahtet Channel → (Audio→Transcriber) → Agent →
 Repository/Logs → Bestätigungsfrage zurück.
 - **Bestätigungs-UX:** Emoji-Reaktion (👍) als Standard, **nummerierte Auswahl**
