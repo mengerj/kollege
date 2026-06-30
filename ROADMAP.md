@@ -12,7 +12,29 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 9 — IMAP read-only (t-online).**
+**Phase-1-Live-Stabilisierung** (vor Schritt 9). Der Signal-Bot läuft echt
+(verknüpft, End-to-End getestet). Jetzt im Alltag stabilisieren, **bevor** neue
+Kanäle dazukommen. Vollständige Einweisung + Backlog:
+[docs/live-testing-guide.md](docs/live-testing-guide.md).
+
+Schwerpunkte (Details/Priorität im Guide §6):
+- 👍-**Reaktion** als Bestätigung erkennen (Tapback ≠ Text; entspricht Design).
+- **`run_forever()` härten** (Fehler fangen, weiterlaufen statt abstürzen).
+- **Logging** im Orchestrator (Empfang/Extraktion/Persistenz nachvollziehbar).
+- **Sprachnachrichten** end-to-end verifizieren; Über-Extraktion eindämmen.
+
+**DoD:** Edge-Case-Tabelle (Guide §4) reproduzierbar grün, 👍-Bestätigung,
+Absturz-Resistenz, korrekte Datumsauflösung.
+
+> **Schritt 9 (IMAP)** ist bereits auf einem **separaten Branch** angefangen.
+> Reihenfolge: diesen Live-Betrieb-PR zuerst nach `main` mergen, dann `main` in
+> den Schritt-9-Branch mergen. Schritt 9 wird erst **nach** der Stabilisierung
+> fortgeführt.
+
+---
+
+## Schritt 9 — IMAP read-only (t-online) *(begonnen, separater Branch)*
+
 `secureimap.t-online.de:993` SSL, strikt lesend. E-Mail-Passwort aus Config/Secrets.
 - Optionale Dependency-Gruppe `email` (`imapclient` o.ä.) in `pyproject.toml`.
 - `Channel`-ähnliches Interface oder direktes Einlesen in den Orchestrator.
@@ -34,7 +56,8 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 | 6 | Signal-Kanal-Adapter (signal-cli-rest-api) | 1 | ✅ erledigt |
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ✅ erledigt |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
-| 9 | IMAP read-only (t-online) | 2 | ⏳ als Nächstes |
+| 8.5 | Signal-Live-Betrieb + Phase-1-Stabilisierung | 1 | ⏳ läuft (Live-Tests/Härtung) |
+| 9 | IMAP read-only (t-online) | 2 | 🚧 begonnen (separater Branch), pausiert |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
 | 12 | Statusabfragen per Chat | 2 | ⬜ offen |

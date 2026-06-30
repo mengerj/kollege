@@ -13,6 +13,7 @@ Setup:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import tempfile
 from collections.abc import Iterable, Iterator
@@ -40,29 +41,45 @@ class SignalChannel:
         self._account = account
         self._download_dir = download_dir or Path(tempfile.mkdtemp(prefix="kollege-signal-"))
         self._receive_timeout = receive_timeout
+        self._connection: Any = None
 
     # ---------------------------------------------------------------------- #
     # Channel Protocol                                                         #
     # ---------------------------------------------------------------------- #
 
     def receive(self) -> Iterable[IncomingMessage]:
-        """Empfängt ausstehende Nachrichten via WebSocket (Batch-Mode).
+        """Liest seit dem letzten Aufruf eingetroffene Nachrichten.
 
-        Verbindet sich, liest bis kein Paket mehr innerhalb von
-        ``receive_timeout`` Sekunden eintrifft, und trennt dann.
-        Für einen Dauerprozess: Schritt 7 (async-Orchestrator).
+        Die WebSocket-Verbindung wird **dauerhaft offen gehalten** und zwischen
+        den Aufrufen wiederverwendet. Grund: Im ``json-rpc``-Modus streamt
+        signal-cli Nachrichten in Echtzeit und spielt sie *nicht* erneut ab.
+        Eine pro Aufruf neu auf- und abgebaute Verbindung verlöre daher jede
+        Nachricht, die in einer Verbindungslücke eintrifft. Jeder Aufruf liest
+        alle gepufferten Pakete, bis kurzzeitig (``receive_timeout``) keines
+        mehr eintrifft, und kehrt dann zurück — die Verbindung bleibt offen.
         """
-        yield from self._ws_receive_batch()
+        yield from self._ws_drain()
 
     def send(self, recipient: str, text: str) -> None:
         """Sendet eine Textnachricht an ``recipient`` via HTTP POST."""
         self._http_send(recipient, text)
 
+    def close(self) -> None:
+        """Schließt die offene WebSocket-Verbindung (idempotent)."""
+        if self._connection is not None:
+            with contextlib.suppress(Exception):
+                self._connection.close()
+            self._connection = None
+
     # ---------------------------------------------------------------------- #
     # Internal: WebSocket receive                                              #
     # ---------------------------------------------------------------------- #
 
-    def _ws_receive_batch(self) -> Iterator[IncomingMessage]:
+    def _ensure_connection(self) -> Any:
+        """Liefert die offene Verbindung; baut sie bei Bedarf (neu) auf."""
+        if self._connection is not None:
+            return self._connection
+
         try:
             from websockets.sync.client import connect as ws_connect
         except ImportError as exc:
@@ -76,37 +93,61 @@ class SignalChannel:
             self._base_url.replace("http://", "ws://").replace("https://", "wss://")
             + f"/v1/receive/{self._account}"
         )
+        self._connection = ws_connect(ws_url)
+        return self._connection
 
-        with ws_connect(ws_url) as connection:
-            while True:
-                try:
-                    raw = connection.recv(timeout=self._receive_timeout)
-                except TimeoutError:
-                    break
-                data: dict[str, Any] = json.loads(raw)
-                msg = self._parse_envelope(data)
-                if msg is not None:
-                    yield msg
+    def _ws_drain(self) -> Iterator[IncomingMessage]:
+        connection = self._ensure_connection()
+        while True:
+            try:
+                raw = connection.recv(timeout=self._receive_timeout)
+            except TimeoutError:
+                break  # nichts mehr gepuffert — Verbindung bleibt offen
+            except Exception:
+                # Verbindung verloren/fehlerhaft: schließen, nächster Aufruf baut neu auf.
+                self.close()
+                break
+            data: dict[str, Any] = json.loads(raw)
+            msg = self._parse_envelope(data)
+            if msg is not None:
+                yield msg
 
     def _parse_envelope(self, data: dict[str, Any]) -> IncomingMessage | None:
         """Parst ein WebSocket-Paket in eine IncomingMessage.
 
-        Gibt None zurück bei Empfangsbestätigungen, Sync-Nachrichten und
-        Datenpaketen ohne Text und ohne Audio-Anhang.
+        Verarbeitet **ausschließlich Note-to-Self**: Nachrichten, die der Nutzer
+        in seinem eigenen „Notiz an mich"-Chat schreibt. Auf dem verknüpften
+        Gerät kommen diese als ``syncMessage.sentMessage`` mit
+        ``destination == eigene Nummer`` an.
+
+        Bewusst **ignoriert** werden:
+        - ``dataMessage`` (eingehende Nachrichten *anderer* Personen) — der Bot
+          soll nicht jede empfangene Signal-Nachricht verarbeiten.
+        - ``sentMessage`` an *andere* Empfänger (normale Chats des Nutzers).
+        - Empfangs-/Lesebestätigungen und sonstige Sync-Typen.
+
+        Eigene Bot-Antworten lösen keine Schleife aus: signal-cli stellt einem
+        Gerät die selbst gesendeten Nachrichten nicht erneut zu (empirisch
+        geprüft, siehe docs/signal-setup.md).
         """
         envelope: dict[str, Any] = data.get("envelope") or {}
         sender = str(envelope.get("sourceNumber") or envelope.get("source") or "")
         timestamp = int(envelope.get("timestamp") or 0)
         message_id = f"{sender}:{timestamp}"
 
-        data_msg: dict[str, Any] | None = envelope.get("dataMessage")
-        if data_msg is None:
+        sync_msg: dict[str, Any] = envelope.get("syncMessage") or {}
+        sent_msg: dict[str, Any] | None = sync_msg.get("sentMessage")
+        if sent_msg is None:
             return None
 
-        text: str | None = data_msg.get("message") or None
+        destination = str(sent_msg.get("destinationNumber") or sent_msg.get("destination") or "")
+        if destination != self._account:
+            return None  # an einen Kontakt gesendet, kein Note-to-Self
+
+        text: str | None = sent_msg.get("message") or None
         audio_path: Path | None = None
 
-        for att in data_msg.get("attachments") or []:
+        for att in sent_msg.get("attachments") or []:
             content_type = str(att.get("contentType") or "")
             if "audio" in content_type:
                 att_id = str(att.get("id") or "")

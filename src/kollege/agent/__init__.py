@@ -60,6 +60,33 @@ agent: Agent[Repository, ExtractionResult] = Agent(
     defer_model_check=True,
 )
 
+_WEEKDAYS_DE = (
+    "Montag",
+    "Dienstag",
+    "Mittwoch",
+    "Donnerstag",
+    "Freitag",
+    "Samstag",
+    "Sonntag",
+)
+
+
+@agent.system_prompt
+def _today_prompt() -> str:
+    """Aktuelles Datum injizieren, damit relative Fristen korrekt aufgelöst werden.
+
+    Das LLM kennt das heutige Datum nicht und würde "morgen"/"nächsten Freitag"/
+    "07.07" sonst relativ zu seinem Trainingsstand raten.
+    """
+    today = datetime.date.today()
+    return (
+        f"Heutiges Datum: {today.isoformat()} ({_WEEKDAYS_DE[today.weekday()]}). "
+        'Löse relative Zeitangaben (z. B. "morgen", "übermorgen", "nächsten Freitag", '
+        '"07.07") immer relativ zu diesem Datum auf. Tagesangaben ohne Jahr beziehen '
+        "sich auf das nächste zukünftige Vorkommen. Gib Fristen stets als ISO-Datum "
+        "(YYYY-MM-DD) an."
+    )
+
 
 @agent.tool
 def upsert_contact(

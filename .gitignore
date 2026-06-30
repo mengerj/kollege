@@ -24,6 +24,9 @@ data/
 *.sqlite
 *.sqlite3
 logs_out/
+
+# Bot runtime logs (siehe docs/live-testing-guide.md)
+*.log
 projects/
 
 # OS / editor

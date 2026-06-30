@@ -6,10 +6,13 @@ Schema ist idempotent (``CREATE TABLE IF NOT EXISTS``).
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Concatenate, cast
 
 from kollege.models import (
     Contact,
@@ -20,6 +23,27 @@ from kollege.models import (
     TaskStatus,
     WaitingOn,
 )
+
+
+def _synchronized[**P, R](
+    method: Callable[Concatenate[Repository, P], R],
+) -> Callable[Concatenate[Repository, P], R]:
+    """Serialisiert den Methodenaufruf über den Repository-eigenen Lock.
+
+    Pydantic-AI führt die Domain-Tools eines Agent-Laufs nebenläufig in
+    Worker-Threads aus. Diese teilen sich dieselbe ``sqlite3.Connection``, die
+    nicht für gleichzeitige Nutzung ausgelegt ist (sonst „bad parameter or other
+    API misuse"). Ein reentranter Lock pro Repository sequenzialisiert daher
+    jede komplette Operation (execute + fetch + commit).
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: Repository, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return cast("Callable[Concatenate[Repository, P], R]", wrapper)
+
 
 _DDL_CONTACTS = """
 CREATE TABLE IF NOT EXISTS contacts (
@@ -78,6 +102,7 @@ class Repository:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
+        self._lock = threading.RLock()
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._create_schema()
@@ -93,6 +118,7 @@ class Repository:
     # Contacts                                                             #
     # ------------------------------------------------------------------ #
 
+    @_synchronized
     def upsert_contact(self, extracted: ExtractedContact) -> Contact:
         """Exact-name-Dedup: vorhandenen Kontakt aktualisieren oder neu anlegen.
 
@@ -145,10 +171,12 @@ class Repository:
         assert result is not None
         return result
 
+    @_synchronized
     def get_contact_by_name(self, name: str) -> Contact | None:
         row = self._conn.execute("SELECT * FROM contacts WHERE name = ?", (name,)).fetchone()
         return self._row_to_contact(row) if row is not None else None
 
+    @_synchronized
     def get_contact_by_id(self, contact_id: int) -> Contact | None:
         row = self._conn.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone()
         return self._row_to_contact(row) if row is not None else None
@@ -160,6 +188,7 @@ class Repository:
     # Projects                                                             #
     # ------------------------------------------------------------------ #
 
+    @_synchronized
     def get_or_create_project(self, title: str, contact_id: int | None = None) -> Project:
         """Hole vorhandenes Projekt per Titel oder lege neues an."""
         row = self._conn.execute("SELECT * FROM projects WHERE title = ?", (title,)).fetchone()
@@ -185,6 +214,7 @@ class Repository:
         assert result is not None
         return result
 
+    @_synchronized
     def update_project(self, project: Project) -> Project:
         """Vorhandenes Projekt per ID aktualisieren."""
         if project.id is None:
@@ -231,6 +261,7 @@ class Repository:
     # Tasks                                                                #
     # ------------------------------------------------------------------ #
 
+    @_synchronized
     def create_task(self, task: Task) -> Task:
         """Neuen Task anlegen; gibt Task mit gesetzter ID zurück."""
         cur = self._conn.execute(
@@ -274,6 +305,7 @@ class Repository:
         d["depends_on"] = json.loads(d.get("depends_on") or "[]")
         return Task.model_validate(d)
 
+    @_synchronized
     def update_task_status(self, task_id: int, status: TaskStatus) -> Task:
         """Task-Status aktualisieren (offen → erledigt / verworfen)."""
         self._conn.execute(
@@ -290,6 +322,7 @@ class Repository:
     # Queries                                                              #
     # ------------------------------------------------------------------ #
 
+    @_synchronized
     def query_open_items(self) -> list[Task]:
         """Alle Tasks mit Status OFFEN — Kernfrage „was liegt noch an?"."""
         rows = self._conn.execute(
@@ -297,16 +330,19 @@ class Repository:
         ).fetchall()
         return [self._row_to_task(r) for r in rows]
 
+    @_synchronized
     def get_all_contacts(self) -> list[Contact]:
         """Alle Kontakte – für die Rekonstruktion nach Tool-Only-Läufen."""
         rows = self._conn.execute("SELECT * FROM contacts").fetchall()
         return [self._row_to_contact(r) for r in rows]
 
+    @_synchronized
     def get_all_projects(self) -> list[Project]:
         """Alle Projekte – für die Rekonstruktion nach Tool-Only-Läufen."""
         rows = self._conn.execute("SELECT * FROM projects").fetchall()
         return [self._row_to_project(r) for r in rows]
 
+    @_synchronized
     def query_waiting_on(self, waiting_on: WaitingOn) -> list[Project]:
         """Projekte nach waiting_on filtern — Kernfrage „bei wem muss ich mich melden?"."""
         rows = self._conn.execute(
