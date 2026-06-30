@@ -269,24 +269,25 @@ def test_persist_result_project_update_creates_log_file(repo: Repository, log_di
 def test_handle_text_message_sends_proposal(orc: Orchestrator, channel: MemoryChannel) -> None:
     with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
         orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
-    assert len(channel.sent) == 1
-    assert "📋" in channel.sent[0][1]
+    assert len(channel.sent) == 2  # Sofort-Quittung + Vorschlag
+    assert "verarbeite" in channel.sent[0][1].lower()  # Quittung zuerst
+    assert "📋" in channel.sent[-1][1]  # Vorschlag als letzte Nachricht
     assert SENDER in orc._pending
 
 
 def test_handle_empty_result_no_pending(orc: Orchestrator, channel: MemoryChannel) -> None:
     with patch("kollege.orchestrator.run_extraction", return_value=_result_empty()):
         orc.handle_message(IncomingMessage(sender=SENDER, text="Hallo"))
-    assert len(channel.sent) == 1
-    assert "konnte" in channel.sent[0][1].lower()
+    assert len(channel.sent) == 2  # Sofort-Quittung + "nichts erkannt"
+    assert "konnte" in channel.sent[-1][1].lower()
     assert SENDER not in orc._pending
 
 
 def test_handle_clarification_sends_question(orc: Orchestrator, channel: MemoryChannel) -> None:
     with patch("kollege.orchestrator.run_extraction", return_value=_result_clarification()):
         orc.handle_message(IncomingMessage(sender=SENDER, text="Irgendwas"))
-    assert len(channel.sent) == 1
-    assert "Rückfrage" in channel.sent[0][1]
+    assert len(channel.sent) == 2  # Sofort-Quittung + Rückfrage
+    assert "Rückfrage" in channel.sent[-1][1]
     assert SENDER not in orc._pending
 
 
@@ -311,8 +312,9 @@ def test_handle_audio_uses_transcriber(
     fake_result = ExtractionResult(tasks=[ExtractedTask(title="Ruf bei Schmidt an")])
     with patch("kollege.orchestrator.run_extraction", return_value=fake_result):
         orchestrator.handle_message(IncomingMessage(sender=SENDER, audio_path=audio_file))
-    assert len(channel.sent) == 1
-    assert "Schmidt" in channel.sent[0][1]
+    assert len(channel.sent) == 2  # Sofort-Quittung (🎤) + Vorschlag
+    assert "🎤" in channel.sent[0][1]
+    assert "Schmidt" in channel.sent[-1][1]
 
 
 def test_no_transcriber_ignores_audio_only_message(
@@ -523,3 +525,75 @@ def test_update_task_status_unknown_id_raises(repo: Repository) -> None:
 
     with pytest.raises(ValueError, match="999"):
         repo.update_task_status(999, TaskStatus.ERLEDIGT)
+
+
+# ---------------------------------------------------------------------------
+# Sofort-Quittung (Schritt 8.8)
+# ---------------------------------------------------------------------------
+
+
+def test_ack_is_first_message_for_text_note(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Sofort-Quittung erscheint als erste Nachricht, Vorschlag als zweite."""
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
+    assert len(channel.sent) == 2
+    ack_text = channel.sent[0][1]
+    proposal_text = channel.sent[1][1]
+    assert "verarbeite" in ack_text.lower()
+    assert "📋" in proposal_text
+
+
+def test_ack_contains_audio_emoji_for_voice_note(
+    repo: Repository,
+    channel: MemoryChannel,
+    settings: Settings,
+    log_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """Sofort-Quittung für Sprachnachrichten enthält 🎤."""
+    audio_file = tmp_path / "voice.ogg"
+    audio_file.write_bytes(b"fake-audio")
+    stub = StubTranscriber(canned_text="Test-Transkript")
+    orchestrator = Orchestrator(
+        channel=channel, repo=repo, transcriber=stub, settings=settings, log_dir=log_dir
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, audio_path=audio_file))
+    assert len(channel.sent) == 2
+    assert "🎤" in channel.sent[0][1]
+
+
+def test_no_ack_for_confirmation_ja(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """'ja' ist eine Bestätigungsantwort — keine Sofort-Quittung."""
+    _prime_pending(orc, channel)
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+    assert len(channel.sent) == 1
+    assert "✅" in channel.sent[0][1]
+
+
+def test_no_ack_for_confirmation_nein(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """'nein' ist eine Ablehnungsantwort — keine Sofort-Quittung."""
+    _prime_pending(orc, channel)
+    orc.handle_message(IncomingMessage(sender=SENDER, text="nein"))
+    assert len(channel.sent) == 1
+    assert "Verworfen" in channel.sent[0][1]
+
+
+def test_no_ack_for_tapback_reaction(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Tapback-Reaktion (👍) löst keine Sofort-Quittung aus."""
+    _prime_pending(orc, channel)
+    orc.handle_message(IncomingMessage(sender=SENDER, text="👍", is_reaction=True))
+    assert len(channel.sent) == 1
+    assert "✅" in channel.sent[0][1]
+
+
+def test_no_ack_for_audio_without_transcriber(
+    orc: Orchestrator, channel: MemoryChannel, tmp_path: Path
+) -> None:
+    """Ohne Transcriber wird eine reine Sprachnachricht still verworfen — keine Quittung."""
+    audio_file = tmp_path / "voice.ogg"
+    audio_file.write_bytes(b"data")
+    orc.handle_message(IncomingMessage(sender=SENDER, audio_path=audio_file))
+    assert channel.sent == []

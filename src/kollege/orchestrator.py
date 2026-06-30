@@ -330,6 +330,13 @@ class Orchestrator:
             # Kein Treffer → neue Nachricht verarbeiten (ersetzt alten Vorschlag)
 
         # Normaler Ablauf: Transkript holen → extrahieren → Vorschlag schicken
+        # Sofort-Quittung — knappe Bestätigung vor der langsamen Verarbeitung
+        # (Transkription kann Minuten dauern, LLM-Extraktion ebenfalls).
+        if msg.audio_path is not None and self._transcriber is not None:
+            self._channel.send(msg.sender, "🎤 Sprachnotiz erhalten, ich verarbeite das kurz …")
+        elif msg.text is not None:
+            self._channel.send(msg.sender, "📝 Notiz erhalten, ich verarbeite das kurz …")
+
         transcript = self._get_transcript(msg)
         if transcript is None or not transcript.strip():
             return
