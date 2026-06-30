@@ -274,6 +274,18 @@ class Repository:
         d["depends_on"] = json.loads(d.get("depends_on") or "[]")
         return Task.model_validate(d)
 
+    def update_task_status(self, task_id: int, status: TaskStatus) -> Task:
+        """Task-Status aktualisieren (offen → erledigt / verworfen)."""
+        self._conn.execute(
+            "UPDATE tasks SET status = ? WHERE id = ?",
+            (str(status), task_id),
+        )
+        self._conn.commit()
+        result = self._get_task_by_id(task_id)
+        if result is None:
+            raise ValueError(f"Task {task_id} nicht gefunden")
+        return result
+
     # ------------------------------------------------------------------ #
     # Queries                                                              #
     # ------------------------------------------------------------------ #

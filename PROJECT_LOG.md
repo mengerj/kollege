@@ -5,6 +5,54 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — Orchestrator + Bestätigungs-Loop (Schritt 7)
+
+**Getan:**
+- [`src/kollege/orchestrator.py`](src/kollege/orchestrator.py): `Orchestrator`-Klasse
+  vollständig implementiert. Verdrahtet Channel → Transcriber → Agent → Repository/Logs →
+  Bestätigungsfrage. Öffentliche API: `handle_message()`, `run_once()`, `run_forever()`.
+- `PendingProposal`-Dataclass (sender, transcript, result, created_at): Zwischenspeicher
+  im Arbeitsspeicher bis zur Nutzerbestätigung.
+- `format_proposal()`: Einzeleintrag → "ja/nein"-UX; mehrere Einträge → nummerierte
+  Auswahl ("1 3") + "ja"/"nein". Emoji-Bestätigung 👍 wird erkannt.
+- `persist_result()`: überträgt `ExtractionResult` (selektiv oder komplett) in das echte
+  Repository. Kontakte zuerst (damit Tasks contact_id auflösen können), dann Projekt-Updates
+  inkl. `open_project_log()`, dann Tasks.
+- `_extract()`: Agent läuft intern gegen ein temporäres In-Memory-Repo — kein echter
+  DB-Schreibzugriff während der Extraktion. Erst auf Bestätigung schreibt `persist_result`
+  in das echte Repo.
+- `Repository.update_task_status()`: in [`src/kollege/db/repository.py`](src/kollege/db/repository.py)
+  ergänzt (für zukünftigen Task-Status-Wechsel z.B. → erledigt).
+- [`tests/test_orchestrator.py`](tests/test_orchestrator.py): 25 neue Tests;
+  `run_extraction` via `unittest.mock.patch` gemockt — CI-sicher, kein LLM.
+  Abgedeckt: Vorschlag, alle Bestätigungsvarianten (ja/👍/JA/Zahlenauswahl),
+  Ablehnung, Audio-Transkription, leere Extraktion, Rückfrage, Pending-Ersatz,
+  Sender-Isolation, `run_once` mit mehreren Nachrichten, `update_task_status`.
+- CI-Kette (ruff/mypy-strict/pytest) grün; 108 Tests, 1 slow deselected.
+
+**Entscheidungen:**
+- **Dry-Run-Extraktion via temporärem In-Memory-Repo:** Agent kann seine Tools normal
+  ausführen (kein Mock), schreibt aber nur in ein Wegwerf-Repo. Auf Bestätigung
+  werden die Extraktionsdaten aus `ExtractionResult` direkt via Repository-Methoden
+  in das echte Repo geschrieben — kein zweiter LLM-Aufruf, keine Tool-Replay.
+- **Pending-State per Absender (dict):** eine offene Bestätigung pro Nutzer.
+  Neue Nachricht ohne ja/nein ersetzt den alten Vorschlag (natürliches Verhalten).
+- **Sync statt async:** `run_forever()` nutzt `time.sleep()` im Polling-Loop.
+  Signal-Channel hat bereits synchrone WebSocket-Unterstützung; async-Refactor
+  ist Schritt 8 / Trockenlauf vorbehalten, wenn echter Daemonbetrieb nötig wird.
+- **`_NUMS`-Regex:** nur Ziffern, Leerzeichen und Komma — "Neue Notiz" fällt durch
+  und wird als neue Nachricht behandelt (kein versehentlicher Bestätigungs-Trigger).
+
+**Offene Punkte / für später:**
+- Signal-Emoji-Reaktionen (als `reactionMessage`-Envelope): aktuell werden nur
+  Textnachrichten mit "👍" erkannt. Echte Signal-Reaktionen erfordern
+  `IncomingMessage.reaction`-Feld und erweiterten `_parse_envelope` (Schritt 8).
+- ffmpeg für OGG/Opus → WAV-Konvertierung vor Whisper (Schritt 8).
+- `run_forever` in Produktionsbetrieb (Schritt 16): systemd-Service oder APScheduler.
+- Bestätigungs-Timeout (alte PendingProposals aufräumen) — für jetzt kein MVP-Blocker.
+
+---
+
 ## 2026-06-29 — Signal-Kanal-Adapter (Schritt 6)
 
 **Getan:**
