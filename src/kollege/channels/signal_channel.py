@@ -22,6 +22,29 @@ from typing import Any
 
 from kollege.channels import IncomingMessage
 
+# Signal-Sprachnachrichten kommen je nach App-Version in unterschiedlichen
+# Formaten (neuere iOS-Clients: AAC, ältere: OGG/Opus). Die Dateiendung ist für
+# faster-whisper zwar unkritisch (ffmpeg erkennt das Format am Inhalt), aber eine
+# korrekte Endung hilft beim Debuggen und bei Tools, die nach Endung gehen.
+_AUDIO_EXT_BY_KEYWORD: tuple[tuple[str, str], ...] = (
+    ("ogg", ".ogg"),
+    ("aac", ".aac"),
+    ("m4a", ".m4a"),
+    ("mp4", ".m4a"),
+    ("mpeg", ".mp3"),
+    ("mp3", ".mp3"),
+    ("wav", ".wav"),
+)
+
+
+def _audio_ext(content_type: str) -> str:
+    """Dateiendung aus dem MIME-contentType ableiten (Fallback ``.bin``)."""
+    ct = content_type.lower()
+    for keyword, ext in _AUDIO_EXT_BY_KEYWORD:
+        if keyword in ct:
+            return ext
+    return ".bin"
+
 
 class SignalChannel:
     """Channel-Adapter für signal-cli-rest-api (Docker).
@@ -212,8 +235,7 @@ class SignalChannel:
                 "    uv sync --group signal"
             ) from exc
 
-        ext = ".ogg" if "ogg" in content_type else ".bin"
-        dest = self._download_dir / f"att-{att_id}{ext}"
+        dest = self._download_dir / f"att-{att_id}{_audio_ext(content_type)}"
         if not dest.exists():
             response = httpx.get(f"{self._base_url}/v1/attachments/{att_id}", timeout=30.0)
             response.raise_for_status()

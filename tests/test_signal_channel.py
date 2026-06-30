@@ -443,6 +443,28 @@ def test_download_attachment_uses_bin_extension_for_unknown_type(tmp_path: Path)
     assert result.suffix == ".bin"
 
 
+@pytest.mark.parametrize(
+    ("content_type", "expected"),
+    [
+        ("audio/ogg; codecs=opus", ".ogg"),
+        ("audio/aac", ".aac"),
+        ("audio/mp4", ".m4a"),
+        ("audio/mpeg", ".mp3"),
+        ("application/octet-stream", ".bin"),
+    ],
+)
+def test_download_attachment_extension_by_content_type(
+    tmp_path: Path, content_type: str, expected: str
+) -> None:
+    """Signal-Sprachnachrichten kommen als OGG (alt) oder AAC/MP4 (neu)."""
+    ch = SignalChannel(base_url=BASE_URL, account=ACCOUNT, download_dir=tmp_path)
+    with patch("httpx.get") as mock_get:
+        mock_get.return_value.content = b"RAW"
+        mock_get.return_value.raise_for_status = MagicMock()
+        result = ch._download_attachment("aid", content_type)
+    assert result.suffix == expected
+
+
 # --------------------------------------------------------------------------- #
 # Import-Fehler (optionale Dependencies fehlen)                                 #
 # --------------------------------------------------------------------------- #
