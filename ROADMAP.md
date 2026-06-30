@@ -12,29 +12,25 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns** (vor E-Mail/IMAP).
+**Schritt 8.6 — Korrektur-/Revisions-Schleife (Quote-Reply).**
 
-Der Live-Härtungs-Backlog (Guide §6) ist umgesetzt und verifiziert; technisch läuft
-der Signal-Bot End-to-End. **Bevor neue Kanäle dazukommen, muss sich der bestehende
-Kern im Alltag flüssig und vertrauenswürdig anfühlen** — genau das entscheidet über
-freiwillige Weiternutzung (Designprinzip 6), nicht zusätzliche Features. IMAP wird
-deshalb bewusst zurückgestellt (siehe unten).
+Schritt 8.8 (Sofort-Quittung) ist erledigt. Als nächstes: per Signal-Zitat-Antwort
+auf den Vorschlag korrigieren statt neu einsprechen.
 
-Reihenfolge nach Wirkung auf „fühlt sich gut an" (Details in **Phase 1.5** unten):
-1. **Sofort-Quittung** (Schritt 8.8) — sonst wirkt die Cold-Start-Latenz wie „nichts
-   passiert" (genau so erlebt). Niedrigste Hürde, höchster gefühlter Gewinn.
-2. **Korrektur-/Revisions-Schleife** (Schritt 8.6) — per Signal-Zitat-Antwort den
-   offenen Vorschlag natürlichsprachig korrigieren statt neu einsprechen.
-3. **Bekannte Namen abgleichen** (Schritt 8.7) — dem Agenten die DB-Namen als
-   Kontext geben, damit verhörte Namen dem richtigen Kontakt zugeordnet werden.
-4. Danach **robuster Dauerbetrieb** (8.9) und **Eval-Set** (8.10).
+Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.6):
+1. `channel.send()` muss den Sende-Timestamp zurückgeben (signal-cli `/v2/send`
+   liefert ihn) → `PendingProposal` speichert ihn.
+2. Eingehende Quote-Reply (`quote.id` matcht `PendingProposal.sent_timestamp`)
+   → Revisions-Lauf: LLM bekommt (Ursprungstranskript + aktuelles ExtractionResult
+   + Korrekturtext) → revidiertes ExtractionResult → erneuter Vorschlag.
+3. Quote-Reply kann auch Audio sein → erst transkribieren, dann als Korrekturtext.
+4. Frische Nachricht ohne Quote bleibt neue Notiz (kein Bruch im bestehenden Ablauf).
+5. Test-driven: Quote-Parsing + Revisions-Branch mit `TestModel`/`FunctionModel`.
 
-Parallel weiter: restliche Edge-Cases der Tabelle (Guide §4) live gegenprüfen
-(explizites Datum, mehrere Tasks/Dedup, `clarification`, Teilauswahl „1 3", „nein").
+Erst Quote-Envelope live mitschneiden (`signal_debug_receive.py`), um Feldnamen
+(`quote.id`/`quote.author`/`quote.text`) zu verifizieren, bevor geparsed wird.
 
-> **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft. Der
-> begonnene Schritt-9-Branch bleibt liegen; die Reihenfolge wird neu bewertet, wenn
-> sich der Sprachnotiz-Kern flüssig anfühlt.
+> **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 
 ---
 
@@ -54,7 +50,7 @@ Parallel weiter: restliche Edge-Cases der Tabelle (Guide §4) live gegenprüfen
 | 8.5 | Signal-Live-Betrieb + Härtung | 1.5 | ⏳ läuft (Live-Tests/Edge-Cases) |
 | 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ⬜ offen (geplant) |
 | 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ⬜ offen (geplant) |
-| 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ⬜ offen (geplant) |
+| 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |

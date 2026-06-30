@@ -5,6 +5,41 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — Schritt 8.8 — Sofort-Quittung (automatische Session)
+
+**Ziel:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt
+wie gehabt. Damit wird die Cold-Start-Latenz (Whisper + LLM) nicht mehr als
+„nichts passiert" wahrgenommen.
+
+**Getan:**
+- **Sofort-Quittung in `Orchestrator.handle_message()`:** Unmittelbar nachdem
+  erkannt wurde, dass es sich um eine neue Notiz (nicht um eine
+  Bestätigungsantwort oder Reaktion) handelt, wird eine knappe Quittung gesendet
+  — bevor `_get_transcript()` oder `_extract()` aufgerufen werden:
+  - Sprachnachricht (Audio + Transcriber vorhanden): `"🎤 Sprachnotiz erhalten, ich verarbeite das kurz …"`
+  - Textnachricht: `"📝 Notiz erhalten, ich verarbeite das kurz …"`
+  - Audio ohne Transcriber: keine Quittung (Nachricht wird still verworfen, wie bisher).
+- **Tests:** 6 neue Tests für das Sofort-Quittungs-Verhalten
+  (`test_ack_is_first_message_for_text_note`, `test_ack_contains_audio_emoji_for_voice_note`,
+  `test_no_ack_for_confirmation_ja`, `test_no_ack_for_confirmation_nein`,
+  `test_no_ack_for_tapback_reaction`, `test_no_ack_for_audio_without_transcriber`);
+  bestehende Tests angepasst (sent-Indizes, Anzahl-Checks).
+- **CI grün:** 137 Tests, ruff + mypy-strict sauber.
+
+**Entscheidungen:**
+- Quittung erfolgt synchron vor der Slow-Path-Verarbeitung — kein zweiter Thread,
+  kein Async nötig, da der Orchestrator ohnehin blockierend ist.
+- Distinkte Emoji-Präfixe (🎤 vs. 📝) helfen beim Unterscheiden im Signal-Chat.
+- Keine Quittung für Audio ohne Transcriber: eine Quittung ohne nachfolgende
+  Antwort wäre schlechter als stilles Verwerfen.
+
+**Offene Punkte / nächste Schritte:**
+- Schritt 8.6 — Korrektur-/Revisions-Schleife via Signal-Quote-Reply.
+- Schritt 8.7 — Bekannte Namen aus DB als LLM-Kontext.
+- Restliche Edge-Cases (§4 des Live-Testing-Guide) weiter live prüfen.
+
+---
+
 ## 2026-06-30 — Phase-1-Härtung + Live-Test mit ornith:9b
 
 Zweite Live-Session gemäß [docs/live-testing-guide.md](docs/live-testing-guide.md):
