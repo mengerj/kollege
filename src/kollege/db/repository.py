@@ -297,6 +297,16 @@ class Repository:
         ).fetchall()
         return [self._row_to_task(r) for r in rows]
 
+    def get_all_contacts(self) -> list[Contact]:
+        """Alle Kontakte – für die Rekonstruktion nach Tool-Only-Läufen."""
+        rows = self._conn.execute("SELECT * FROM contacts").fetchall()
+        return [self._row_to_contact(r) for r in rows]
+
+    def get_all_projects(self) -> list[Project]:
+        """Alle Projekte – für die Rekonstruktion nach Tool-Only-Läufen."""
+        rows = self._conn.execute("SELECT * FROM projects").fetchall()
+        return [self._row_to_project(r) for r in rows]
+
     def query_waiting_on(self, waiting_on: WaitingOn) -> list[Project]:
         """Projekte nach waiting_on filtern — Kernfrage „bei wem muss ich mich melden?"."""
         rows = self._conn.execute(

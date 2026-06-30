@@ -5,6 +5,59 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-30 — End-to-End-Trockenlauf (Schritt 8)
+
+**Getan:**
+- **ffmpeg** via Homebrew installiert (OGG/Opus → WAV-Konvertierung für Whisper).
+- **faster-whisper** via `uv sync --group transcription` installiert.
+- **`qwen2.5:7b-instruct`** via `ollama pull` heruntergeladen (4,7 GB; ersetzt `gemma4:e2b`
+  als Tool-Call-fähiges Modell).
+- [`scripts/trockenlauf.py`](scripts/trockenlauf.py): lokale E2E-Simulation ohne echtes Signal.
+  Verwendet `MemoryChannel` + `StubTranscriber`/echter Whisper + Ollama + SQLite.
+  Drei Fake-Szenarien: Neuer Kontakt+Task, Kontakt+Projektstatus, einfaches To-Do.
+- **Bugfix — Fallback-Pfad in `run_extraction`**: `qwen2.5:7b` ruft Domain-Tools
+  korrekt auf, aber nicht das pydantic-ai-interne `final_result`-Tool für strukturierten
+  Output. Neuer Fallback-Pfad: Agent mit `output_type=str` → Tools speichern in DB →
+  `_rebuild_from_repo()` rekonstruiert `ExtractionResult` aus DB-Zustand.
+  Frische Verbindung im Fallback verhindert Doppelschreibungen und Commit-Fehler.
+- [`src/kollege/db/repository.py`](src/kollege/db/repository.py): `get_all_contacts()`
+  und `get_all_projects()` als öffentliche Methoden ergänzt.
+- [`src/kollege/agent/__init__.py`](src/kollege/agent/__init__.py): `_rebuild_from_repo()`
+  und überarbeitete `run_extraction()` mit Primär-/Fallback-Logik.
+- CI-Kette grün; alle 108 Tests bestehen.
+
+**Trockenlauf-Ergebnis (3/3 Szenarien ✅):**
+
+| Szenario | Extraktion | Bestätigung | DB-Effekt |
+|---|---|---|---|
+| Frau Müller / Bebauungsplan Grüne Mitte | ✅ Kontakt + Task erkannt | ✅ gespeichert | 1 Kontakt, 1 Task |
+| Herr Schneider / Naturpark Feldweg | ✅ Kontakt + Task + Projektstatus | ✅ gespeichert | 1 Kontakt, 1 Task, 1 Projekt |
+| Pflanzenliste Familie Wagner | ✅ Task erkannt | ✅ gespeichert | 1 Task |
+
+Whisper-Test: Stille-WAV → leeres Transkript (korrekt erkannt). ffmpeg-Integration
+für OGG/Opus-Konvertierung bereit.
+
+**Entscheidungen:**
+- **Fallback-Architektur**: Statt pydantic-ais Tool-Output-Modus (der `final_result`-Tool
+  erfordert, das qwen2.5:7b ignoriert) kein Modellwechsel — stattdessen Fallback, der
+  DB-Zustand nach Tool-Ausführung rekonstruiert. Tests bleiben unverändert, weil
+  TestModel/FunctionModel den Primär-Pfad nutzen.
+- **Frische Verbindung im Fallback**: verhindert Doppelschreibungen (Primär-Lauf
+  schreibt schon via Tools → Fallback-Lauf schreibt erneut) und SQLite-Commit-Fehler.
+- **Datum-Extraktion unkritisch**: qwen2.5:7b liefert teils falsche Jahreszahlen
+  (z.B. 2023 statt 2026). Für Schritt 8 akzeptabel — Datum kann beim Bestätigungsdialog
+  korrigiert werden.
+
+**Offene Punkte / für später:**
+- Echter Signal-Trockenlauf (manuell): `docker compose up -d` + Signal-Linking +
+  echte Sprachnotiz. Erfordert laufenden Docker-Daemon.
+- Datum-Kalibrierung des Prompts (CLAUDE.md nennt qwen2.5:7b als empfohlenes Modell;
+  Prompt mit heutigem Datum könnte helfen).
+- OGG/Opus-Testfixture mit echter Sprachaufnahme (bisher nur Stille-WAV).
+- Bestätigungs-Timeout (alte PendingProposals aufräumen) — kein MVP-Blocker.
+
+---
+
 ## 2026-06-30 — Orchestrator + Bestätigungs-Loop (Schritt 7)
 
 **Getan:**
