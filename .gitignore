@@ -15,6 +15,9 @@ build/
 .env
 *.key
 
+# Signal-CLI private keys (linked device credentials — never commit!)
+signal-cli-config/
+
 # Local data (never commit real user data!)
 data/
 *.db

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(slots=True)
@@ -21,6 +21,7 @@ class IncomingMessage:
     message_id: str | None = None
 
 
+@runtime_checkable
 class Channel(Protocol):
     """Empfängt und sendet Nachrichten über einen Kanal."""
 

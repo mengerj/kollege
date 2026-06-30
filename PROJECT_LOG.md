@@ -5,6 +5,46 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-06-29 — Signal-Kanal-Adapter (Schritt 6)
+
+**Getan:**
+- [`src/kollege/channels/signal_channel.py`](src/kollege/channels/signal_channel.py):
+  `SignalChannel` implementiert das `Channel`-Protocol vollständig.
+  Empfang via WebSocket (`/v1/receive/{account}`), Senden via HTTP POST (`/v2/send`),
+  Anhänge (OGG/Opus) werden lokal gespeichert (`_download_attachment` mit Cache).
+  Lazy-Imports für `websockets` und `httpx` mit klaren Fehlermeldungen.
+- [`src/kollege/channels/__init__.py`](src/kollege/channels/__init__.py):
+  `Channel`-Protocol mit `@runtime_checkable` annotiert (Konsistenz mit `Transcriber`).
+- [`pyproject.toml`](pyproject.toml): optionale Dependency-Gruppe `signal`
+  (`httpx>=0.27`, `websockets>=13.0`); mypy-Override für `httpx` und `websockets.*`.
+- [`docker-compose.yml`](docker-compose.yml): `bbernhard/signal-cli-rest-api` im
+  `json-rpc`-Modus (WebSocket-Streaming), Port 8080, Config-Volume.
+- [`docs/signal-setup.md`](docs/signal-setup.md): Schritt-für-Schritt-Linking-Anleitung
+  (QR-Code, Smartphone-Scan, Testbefehl), Sicherheitshinweise.
+- [`.gitignore`](.gitignore): `signal-cli-config/` (private Schlüssel) eingetragen.
+- [`tests/test_signal_channel.py`](tests/test_signal_channel.py): 14 neue Tests;
+  Protocol-Konformität, Text/Audio-Empfang, Mehrfachnachrichten, Anhang-Cache,
+  URL-Konstruktion, Import-Fehler — alle gegen Mocks, kein echter Container.
+- CI-Kette (ruff/mypy-strict/pytest) grün; 83 Tests, 1 slow deselected.
+
+**Entscheidungen:**
+- Batch-Modus für `receive()`: verbindet, liest bis `TimeoutError` (Standard: 0.5 s),
+  trennt dann. Für Dauerprozess kommt der async-Orchestrator in Schritt 7.
+- Lazy-Import-Pattern: identisch mit `FasterWhisperTranscriber` — kein `ImportError`
+  beim Import des Moduls, nur beim ersten Aufruf; `uv sync --group signal` als Hinweis.
+- WebSocket-URL aus HTTP-URL ableiten (str-Replace); so bleibt nur `signal_api_url`
+  in der Config (kein separates `signal_ws_url`).
+- Attachment-Dateiname `att-{id}.ogg` / `att-{id}.bin` — eindeutig, cachefreundlich.
+
+**Offene Punkte / für später:**
+- Echter Integrations-Test gegen lokalen Container (manuell: `docker compose up -d`,
+  dann `uv run pytest -m integration`, noch nicht implementiert).
+- ffmpeg für OGG/Opus → WAV-Konvertierung vor Whisper (Schritt 8 / Trockenlauf).
+- Reaktionsempfang (Signal-Emoji-Reaktionen) für den Bestätigungs-Loop (Schritt 7).
+- `receive_timeout` könnte über Settings konfigurierbar sein — für Schritt 7 entscheiden.
+
+---
+
 ## 2026-06-29 — Transkriptions-Backend faster-whisper (Schritt 5)
 
 **Getan:**
