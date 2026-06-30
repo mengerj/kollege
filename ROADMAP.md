@@ -59,6 +59,7 @@ Absturz-Resistenz, Datumsauflösung (morgen/übermorgen), Audio-E2E bereits best
 | 7 | Orchestrator + Bestätigungs-Loop | 1 | ✅ erledigt |
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
 | 8.5 | Signal-Live-Betrieb + Phase-1-Stabilisierung | 1 | ⏳ läuft (Live-Tests/Härtung) |
+| 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1 | ⬜ offen (geplant) |
 | 9 | IMAP read-only (t-online) | 2 | 🚧 begonnen (separater Branch), pausiert |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -159,6 +160,54 @@ Lokale Simulation (MemoryChannel) + echter Ollama (qwen2.5:7b-instruct) + Whispe
 3/3 Szenarien erfolgreich. Fallback-Pfad für Modelle ohne final_result-Tool implementiert.
 Echter Signal-Trockenlauf (mit Docker + Smartphone) steht noch aus, ist aber kein Blocker.
 **DoD:** ✅ Extraktion → DB → Bestätigung sauber dokumentiert beantwortet (siehe PROJECT_LOG.md).
+
+### Schritt 8.6 — Korrektur-/Revisions-Schleife (natürlichsprachig) ⬜
+
+**Motiv.** Transkription (auch mit größeren Whisper-Modellen) und das LLM machen
+gelegentlich Fehler — typisch ein **falsch verstandener Name** („Herr Schnitt"
+statt „Schmidt") oder ein verrutschtes Datum. Statt den Vorschlag zu verwerfen und
+neu einzusprechen, soll die Nutzerin **in natürlicher Sprache korrigieren**:
+*„Das ist nicht Herr Schnitt, sondern Schmidt"* → das System aktualisiert den/die
+Einträge. Stark im Sinne der Designprinzipien (passive Erfassung, Human-in-the-loop,
+keine manuelle DB-Pflege).
+
+**Zwei Korrektur-Zeitpunkte (getrennt schneiden):**
+- **A — vor der Bestätigung (MVP, höchster Wert):** Solange ein `PendingProposal`
+  offen ist, wird eine Korrektur-Antwort nicht als neue Notiz behandelt, sondern
+  **revidiert den bestehenden Vorschlag**. Ein „Revisions-Lauf" bekommt
+  (Ursprungstranskript + aktuelles `ExtractionResult` + Korrekturtext) und erzeugt
+  ein neues `ExtractionResult`, das erneut als Vorschlag gezeigt wird. Nichts ist
+  bis dahin persistiert — risikoarm.
+- **B — nach der Bestätigung (später):** Korrektur an bereits gespeicherten
+  Einträgen. Erfordert eine Referenz auf die zuletzt persistierten Items pro
+  Absender (analog `PendingProposal`, z. B. `LastPersistedBatch`), neue
+  Repository-Methoden (`rename_contact`/`update_contact`, gezieltes `update_task`)
+  **inkl. Markdown-Log-Konsistenz**, und Auflösung von Mehrdeutigkeit („welcher
+  Schmidt?").
+
+**Kernproblem — Intent-Erkennung.** Bei offenem Vorschlag muss eine freie Textantwort
+zuverlässig klassifiziert werden als **(a) Bestätigung**, **(b) Ablehnung**,
+**(c) Korrektur des Vorschlags** oder **(d) komplett neue Notiz**. Heute fällt alles
+außer ja/nein/Zahlen in „neue Notiz". Optionen: kleiner LLM-Klassifikator
+(zuverlässig, aber Latenz/Modellqualität — vgl. ornith-Cold-Start) oder Heuristik
++ Rückfrage bei Unsicherheit (Designprinzip 3: im Zweifel nachfragen).
+
+**Technischer Hebel — Signal-Quote-Reply.** Wenn die Nutzerin **auf eine bestimmte
+Nachricht antwortet** (Zitat-Reply), enthält das Envelope ein `quote` mit
+`targetSentTimestamp`. Damit ließe sich eine Korrektur **eindeutig** einem Vorschlag
+(bzw. später einem gespeicherten Item) zuordnen — robuster als reine Intent-Heuristik.
+Vor Umsetzung: echte Quote-Struktur mit `signal_debug_receive.py` mitschneiden.
+
+**Offene Entscheidungen:** Intent per LLM vs. Heuristik+Rückfrage; Quote-Reply als
+Pflicht oder optionaler Hebel; Kontakt-Umbenennung mit Merge-Semantik
+(`upsert_contact` dedupt per Name → „Schnitt"→„Schmidt" könnte zwei Einträge
+zusammenführen); Scope strikt auf A halten (Scope-Creep-Risiko, vgl. CLAUDE.md).
+
+**DoD (Stufe A):** Bei offenem Vorschlag korrigiert eine natürlichsprachige Antwort
+(„nicht X sondern Y", „Datum ist Freitag") den Vorschlag sichtbar, ohne neu
+einsprechen zu müssen; Bestätigung speichert die korrigierte Fassung. Deterministische
+Teile (Intent-Branching, Revisions-Merge) test-driven; LLM-Teile via
+`TestModel`/`FunctionModel`.
 
 ---
 
