@@ -64,6 +64,12 @@ _YES = re.compile(r"^\s*(ja|yes|👍|bestätigen?|ok|okay)\s*$", re.IGNORECASE)
 _NO = re.compile(r"^\s*(nein|no|abbrechen?|verwerfen?|cancel)\s*$", re.IGNORECASE)
 _NUMS = re.compile(r"^[\d\s,]+$")
 
+# Anzahl Versuche und Standard-Wartezeit (Sekunden) bei transienten Extraktionsfehlern.
+# Transient = Ollama/Whisper/Container kurzfristig nicht erreichbar.
+# Standard 10 s Wartezeit; in Tests über retry_delay=0.0 übersteuern.
+_EXTRACTION_RETRIES = 3
+_EXTRACTION_RETRY_DELAY = 10.0
+
 
 def _now() -> datetime:
     return datetime.now(tz=UTC)
@@ -287,6 +293,7 @@ class Orchestrator:
         transcriber: Transcriber | None,
         settings: Settings,
         log_dir: Path,
+        retry_delay: float = _EXTRACTION_RETRY_DELAY,
     ) -> None:
         self._channel = channel
         self._repo = repo
@@ -294,6 +301,7 @@ class Orchestrator:
         self._settings = settings
         self._log_dir = log_dir
         self._pending: dict[str, PendingProposal] = {}
+        self._retry_delay = retry_delay
 
     # ---------------------------------------------------------------------- #
     # Öffentliche API                                                          #
@@ -429,10 +437,31 @@ class Orchestrator:
 
         Bekannte Kontakt-/Projektnamen aus dem echten Repository werden dem
         Transkript vorangestellt, damit das LLM Whisper-Verhörer normalisieren kann.
+
+        Bei transienten Fehlern (z. B. Ollama gerade nicht erreichbar, RAM-Engpass)
+        wird der Aufruf bis zu ``_EXTRACTION_RETRIES``-mal wiederholt. Die Wartezeit
+        zwischen den Versuchen ist über ``retry_delay`` konfigurierbar (Standard
+        ``_EXTRACTION_RETRY_DELAY`` s; in Tests auf 0.0 setzen).
         """
-        tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
         known_names = get_known_names_context(self._repo)
-        return run_extraction(transcript, tmp_repo, self._settings, known_names_context=known_names)
+        last_exc: Exception = RuntimeError("Extraktion: kein Versuch unternommen")
+        for attempt in range(_EXTRACTION_RETRIES):
+            tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
+            try:
+                return run_extraction(
+                    transcript, tmp_repo, self._settings, known_names_context=known_names
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _EXTRACTION_RETRIES - 1:
+                    logger.warning(
+                        "Extraktion fehlgeschlagen (Versuch %d/%d) — warte %.0fs …",
+                        attempt + 1,
+                        _EXTRACTION_RETRIES,
+                        self._retry_delay,
+                    )
+                    time.sleep(self._retry_delay)
+        raise last_exc
 
     def _confirm(self, sender: str, indices: list[int] | None) -> None:
         proposal = self._pending.pop(sender)

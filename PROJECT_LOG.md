@@ -5,6 +5,83 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-01 — Schritt 8.9 — Robuster Dauerbetrieb (automatische Session)
+
+**Ziel:** Den Bot unbeaufsichtigt und stabil laufen lassen: Auto-Restart,
+Cold-Start abfedern, Fehlertoleranz bei transientem Ausfall von Ollama/Container,
+Nachrichten-Verlust bei Verbindungslücke klären.
+
+**Getan:**
+
+### Pre-Warm Ollama-Modell beim Start
+- **`pre_warm_model(settings: Settings) -> None`** in [`src/kollege/agent/__init__.py`](src/kollege/agent/__init__.py):
+  Sendet einen leeren POST an `/api/generate` der nativen Ollama-API, damit das
+  Modell beim Starten des Dienstes in den VRAM geladen wird — bevor die erste
+  Sprachnotiz eintrifft. Scheitert das Vorladen (Ollama noch nicht bereit), wird
+  nur gewarnt; der Bot startet trotzdem.
+- `scripts/run_signal.py` ruft `pre_warm_model(settings)` jetzt zwischen den
+  Vorab-Prüfungen und `run_forever()` auf.
+
+### Retry bei transienten Fehlern
+- **`_EXTRACTION_RETRIES = 3`** und **`_EXTRACTION_RETRY_DELAY = 10.0 s`** in
+  [`src/kollege/orchestrator.py`](src/kollege/orchestrator.py): konstante Werte für Wiederholungen.
+- **`Orchestrator._extract()`**: schlägt die Extraktion fehl (z. B. Ollama gerade
+  nicht erreichbar nach RAM-Druck), wird sie bis zu dreimal wiederholt. Zwischen
+  den Versuchen `retry_delay` Sekunden warten. Auf Ebene der Tests auf `0.0`
+  setzbar über neuen `Orchestrator`-Parameter `retry_delay`.
+- Frische `tmp_repo`-Verbindung pro Versuch verhindert Dopple-Schreibungen aus
+  einem halb-abgearbeiteten Versuch.
+- Sind alle Versuche erschöpft, propagiert die Exception zu `run_once()`, das die
+  Fehlermeldung an den Absender sendet — wie bisher.
+
+### launchd-Service für macOS
+- **[`deploy/de.mengerj.kollege.plist`](deploy/de.mengerj.kollege.plist)**:
+  launchd User Agent (macOS). Konfiguriert `KeepAlive = true` (Auto-Restart bei
+  Absturz), `ThrottleInterval = 60 s` (Mindestabstand zwischen Neustarts),
+  gemeinsame Log-Datei für stdout+stderr, korrekte PATH-Variable für `uv` und
+  Homebrew-Tools. Mit Kommentaren für Installation, Starten/Stoppen und
+  Deinstallation.
+
+### Nachrichten-Verlust bei Verbindungslücke — Analyse
+Kein eigenes Ack-Protokoll nötig:
+- **WebSocket-Lücke** (Bot läuft, Connection bricht kurz): signal-cli puffert die
+  Nachrichten im Arbeitsspeicher; bei Reconnect werden sie nachgeliefert.
+- **signal-cli-Neustart** (Docker-Container neu): signal-cli verbindet sich mit
+  dem Signal-Server neu und holt unquittierte Nachrichten ab (Signal hält
+  Nachrichten für verknüpfte Geräte ~30 Tage).
+- **Bot-Absturz/-Neustart**: launchd startet den Bot neu (≤ ThrottleInterval);
+  bis zum Neustart gepufferte Nachrichten werden danach ausgeliefert.
+- Einziges stilles Verlust-Risiko: Container **und** Bot beide offline **ohne je
+  zu reconnecten** — unrealistisch im täglichen Betrieb. Dokumentiert in
+  `scripts/run_signal.py`.
+
+### Tests
+- **9 neue Tests** in [`tests/test_dauerbetrieb.py`](tests/test_dauerbetrieb.py):
+  - `pre_warm_model`: korrekte URL-Bildung (mit `/v1`-Strip), Cloud-Provider
+    überspringen, graceful Fallback bei Connection Error und HTTP Error.
+  - Retry-Logik: 2 Fehler → 3. Versuch erfolgreich; alle Versuche erschöpft →
+    Exception; erster Versuch erfolgreich → kein Retry; `run_once()` fängt
+    erschöpfte Retries und sendet Fehlermeldung.
+- **173 Tests grün**, ruff + mypy-strict sauber.
+
+**Entscheidungen:**
+- **Retry in `_extract()`, nicht in `run_extraction()`:** Die Retry-Logik gehört
+  in den Orchestrator, weil er den Channel (für Ack) kennt und den Kontext
+  (Transcript, offene Proposals) hat. `run_extraction()` bleibt zustandslos.
+- **`ThrottleInterval = 60 s`:** Kompromiss zwischen schnellem Neustart nach
+  Ollama-Restart (~30 s) und Schutz vor Restart-Schleifen.
+- **Kein eigenes Ack-Protokoll:** signal-cli's Puffer + Signal-Server-Queuing
+  reichen aus; zusätzlicher Mechanismus wäre Over-Engineering.
+- **Pre-Warm nur für Ollama:** Cloud-Provider (Anthropic, OpenAI) haben kein
+  Cold-Start-Problem.
+
+**Offene Punkte / nächste Schritte:**
+- Schritt 8.10 — Eval-Set für Extraktionsqualität.
+- Live-Test des launchd-Dienstes (manuell, erfordert `cp deploy/…plist ~/Library/LaunchAgents/`).
+- Optional: Log-Rotation für `kollege.log` (z. B. via `newsyslog` oder `logrotate`).
+
+---
+
 ## 2026-06-30 — Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig, automatische Session)
 
 **Ziel:** Bekannte Kontakt- und Projektnamen aus der DB dem Agenten als Kontext
