@@ -12,19 +12,18 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig).**
+**Schritt 8.9 — Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz).**
 
-Schritt 8.6 (Quote-Reply-Revision) ist erledigt. Als nächstes: bekannte
-Kontakt-/Projektnamen aus der DB dem Agenten als Kontext mitgeben, damit Whisper-
-Verhörer (z. B. „Herr Schnitt" → „Schmidt") schon bei der Extraktion erkannt
-und korrigiert werden (statt den Revisions-Schritt bemühen zu müssen).
+Schritt 8.7 (Bekannte Namen abgleichen) ist erledigt. Als nächstes: den Bot
+unbeaufsichtigt und stabil laufen lassen.
 
-Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.7):
-1. Vor der Extraktion bekannte Namen aus dem Repo laden und dem Agenten als
-   Kontext geben (System-Prompt-Anhang oder Tool `lookup_known_names()`).
-2. Kandidaten vorfiltern (kürzlich aktiv / grobe Ähnlichkeit) bei großer DB.
-3. Mehrdeutigkeit → `clarification` statt stilles Überschreiben.
-4. Test-driven: Abgleich-/Vorfilter-Logik; LLM-Teil via `TestModel`/`FunctionModel`.
+Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.9):
+1. **Auto-Restart** via launchd (macOS) statt manuellem `nohup`.
+2. **Cold-Start abfedern:** Ollama-Modell beim Start vorladen (Pre-Warm), Trade-off
+   RAM vs. Latenz prüfen.
+3. **Fehlertoleranz:** sauberes Verhalten wenn Ollama/Whisper/Container kurz weg sind.
+4. **Nachrichten-Verlust bei Verbindungslücke** klären (signal-cli Nachrichten-
+   Nachlieferung).
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 
@@ -45,7 +44,7 @@ Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.7):
 | 8 | End-to-End-Trockenlauf (Fake-Projekte) | 1 | ✅ erledigt |
 | 8.5 | Signal-Live-Betrieb + Härtung | 1.5 | ⏳ läuft (Live-Tests/Edge-Cases) |
 | 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ✅ erledigt |
-| 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ⬜ offen (geplant) |
+| 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ✅ erledigt |
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
@@ -212,7 +211,7 @@ Name → „Schnitt"→„Schmidt" könnte zwei Einträge zusammenführen). Scop
 sichtbar; Bestätigung speichert die korrigierte Fassung; frische Nachricht bleibt
 neue Notiz. Quote-Parsing + Revisions-Branch test-driven; 148 Tests grün.
 
-### Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig statt Whisper-Prompt) ⬜
+### Schritt 8.7 — Bekannte Namen abgleichen (LLM-seitig statt Whisper-Prompt) ✅
 
 **Motiv.** Whisper verhört **Eigennamen** am häufigsten („Herr Schnitt" statt
 „Schmidt"). Naheliegend wäre, die DB-Namen Whisper als `initial_prompt`-Vokabular
@@ -242,10 +241,11 @@ unbegrenzt — bei großer DB die Kandidaten **vorfiltern** (kürzlich aktiv / g
 **Über-Korrigierens** (echter neuer „Schnitt" wird fälschlich zu „Schmidt") → im
 Zweifel nachfragen, Eval-Set (8.10) als Wächter.
 
-**DoD:** Eine Notiz, die einen bereits bekannten (leicht verhörten) Namen enthält,
-wird dem existierenden Kontakt/Projekt zugeordnet statt als neuer Eintrag angelegt;
-unbekannte Namen unverändert. Abgleich-/Vorfilter-Logik test-driven; LLM-Teil via
-`TestModel`/`FunctionModel`.
+**DoD:** ✅ Bekannte Kontakt- und Projektnamen werden vor jeder Extraktion als
+Kontext-Block dem Transkript vorangestellt; `filter_known_names` priorisiert
+kürzlich aktive Einträge (max 80); unbekannte Namen bleiben unverändert.
+Abgleich-/Vorfilter-Logik test-driven; LLM-Teil via `TestModel`/`FunctionModel`.
+164 Tests grün.
 
 ### Schritt 8.8 — Sofort-Quittung / gefühlte Reaktionszeit ⬜
 Cold-Start + Whisper + LLM erzeugen spürbare Latenz; ohne Rückmeldung wirkt das wie
