@@ -12,16 +12,19 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.10 — Eval-Set für Extraktionsqualität.**
+**Phase 1.5 ist weitgehend abgeschlossen. Empfehlung: Alltags-Trockenlauf.**
 
-Schritt 8.9 (Robuster Dauerbetrieb) ist erledigt. Als nächstes: ein kleines
-Fixture-Set aus Beispiel-Transkripten → erwartete Felder, damit Modell-/Prompt-
-Wechsel messbar werden.
+Schritt 8.10 (Eval-Set) ist erledigt. Phase 1.5 hat jetzt:
+- Korrektur-/Revisions-Schleife (8.6) ✅
+- Bekannte-Namen-Kontext (8.7) ✅
+- Sofort-Quittung (8.8) ✅
+- Robuster Dauerbetrieb / launchd (8.9) ✅
+- Eval-Set (8.10) ✅
 
-Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.10):
-1. Fixture-Transkripte (3–5 Beispiele) mit erwartetem Output in `tests/fixtures/`.
-2. Eval-Runner (`uv run pytest -m eval` o. Ä.) mit `FunctionModel`-Mocks für CI.
-3. Schwellenwert-Tests statt striktem Equality-Assert (LLM-Nichtdeterminismus).
+**Empfohlener nächster Schritt:** Echten Alltags-Betrieb starten und Eval-Baseline
+dokumentieren (`pytest -m eval --real-llm -s`). Danach auf Basis der Erfahrungen
+entscheiden: Edge-Cases aus 8.5 live grün machen oder Phase 2 (IMAP, Schritt 9)
+beginnen.
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 
@@ -45,7 +48,7 @@ Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.10):
 | 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ✅ erledigt |
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
-| 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
+| 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -265,13 +268,12 @@ Der Bot läuft **unbeaufsichtigt** und übersteht Störungen:
   signal-cli puffert, Signal-Server queued ~30 Tage (analysiert, dokumentiert).
 **DoD:** ✅ 173 Tests grün; Pre-Warm, Retry-Logik und launchd-Plist implementiert.
 
-### Schritt 8.10 — Eval-Set für Extraktionsqualität ⬜
-Kleines Fixture-Set aus Beispiel-Transkripten → erwartete Felder (Schwellen/Smoke,
-kein striktes Assert). Macht **Modell-/Prompt-Wechsel messbar** (ornith ↔ qwen ↔ …)
-und sichert Dedup/Datumsauflösung/Vokabular-Bias (8.7) gegen Regression ab.
-Modell-agnostisch; im CI ohne echtes LLM (`TestModel`/`FunctionModel`), echte Modelle
-nur im manuellen Lauf.
-**DoD:** `make eval` o. ä. zeigt pro Modell eine Trefferquote über die Fixtures.
+### Schritt 8.10 — Eval-Set für Extraktionsqualität ✅
+5 Fixture-Transkripte in [`tests/fixtures/eval/`](tests/fixtures/eval/) mit
+erwartetem Output. [`tests/test_eval.py`](tests/test_eval.py) mit `@pytest.mark.eval`:
+- CI: `FunctionModel`-Mocks → Schema + Mindest-Counts.
+- Manuell: `pytest -m eval --real-llm -s` → Trefferquote pro Fixture (Schwellenwert 50 %).
+**DoD:** ✅ `uv run pytest -m eval --real-llm -s` zeigt Trefferquote; 175 Tests grün.
 
 ---
 

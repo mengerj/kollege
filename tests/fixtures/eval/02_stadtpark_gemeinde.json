@@ -1,0 +1,13 @@
+{
+  "id": "stadtpark_gemeinde",
+  "description": "Projektstatus-Update: Gemeinde als Wartegrund",
+  "transcript": "Beim Stadtpark-Projekt warten wir jetzt auf die Gemeinde Bergheim. Status ist Planung. Nächste Aktion: Genehmigung abwarten.",
+  "expected": {
+    "min_contacts": 0,
+    "contact_names": [],
+    "min_tasks": 0,
+    "task_keywords": [],
+    "min_project_updates": 1,
+    "project_names": ["Stadtpark"]
+  }
+}

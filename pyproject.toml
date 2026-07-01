@@ -65,6 +65,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers -m 'not slow'"
 markers = [
     "slow: marks tests as slow, require faster-whisper installed (deselect with '-m \"not slow\"')",
+    "eval: marks eval-set tests (run with 'pytest -m eval'; --real-llm for actual LLM scoring)",
 ]
 
 [tool.coverage.run]

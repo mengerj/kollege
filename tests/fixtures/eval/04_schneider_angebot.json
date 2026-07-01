@@ -1,0 +1,13 @@
+{
+  "id": "schneider_angebot",
+  "description": "Kontakt mit Projektreferenz + termingebundener Task",
+  "transcript": "Herr Schneider vom Naturpark Feldweg hat angerufen. Er wartet auf unser Angebot für die Wegebefestigung. Ich muss das bis Freitag fertig haben.",
+  "expected": {
+    "min_contacts": 1,
+    "contact_names": ["Schneider"],
+    "min_tasks": 1,
+    "task_keywords": ["Angebot", "Wegebefestigung"],
+    "min_project_updates": 0,
+    "project_names": []
+  }
+}

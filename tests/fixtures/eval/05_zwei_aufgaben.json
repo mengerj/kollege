@@ -1,0 +1,13 @@
+{
+  "id": "zwei_aufgaben",
+  "description": "Zwei klar getrennte Aufgaben in einer Notiz, zwei Kontakte",
+  "transcript": "Zwei Sachen: Erstens muss ich der Gemeinde Altdorf die überarbeiteten Pläne für den Spielplatz schicken. Zweitens: Frau Berger von der Baumschule Berger anrufen wegen der Lieferung der Bäume.",
+  "expected": {
+    "min_contacts": 1,
+    "contact_names": ["Berger", "Altdorf"],
+    "min_tasks": 2,
+    "task_keywords": ["schicken", "anrufen"],
+    "min_project_updates": 0,
+    "project_names": []
+  }
+}

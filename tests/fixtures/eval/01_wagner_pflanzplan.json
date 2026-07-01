@@ -1,0 +1,13 @@
+{
+  "id": "wagner_pflanzplan",
+  "description": "Privatkundin + Task mit Projektbezug und Frist",
+  "transcript": "Ich hab gerade mit der Frau Wagner telefoniert, Privatkundin. Sie braucht bis Ende Juli einen Pflanzplan für ihren Vorgarten. Das Projekt heißt Vorgarten Wagner.",
+  "expected": {
+    "min_contacts": 1,
+    "contact_names": ["Wagner"],
+    "min_tasks": 1,
+    "task_keywords": ["Pflanzplan"],
+    "min_project_updates": 0,
+    "project_names": []
+  }
+}
