@@ -224,3 +224,35 @@ def test_query_open_items_tool_returns_string() -> None:
 
     model = _make_tool_model("query_open_items", {})
     agent.run_sync("...", model=model, deps=repo)
+
+
+# --------------------------------------------------------------------------- #
+# run_clarification_response — Prompt-Komposition (Schritt 8.13)               #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_clarification_response_builds_prompt() -> None:
+    """Der Klärungs-Lauf reicht Transkript, Rückfrage und Antwort an run_extraction."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_clarification_response
+
+    captured: dict[str, str] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_clarification_response(
+            original_transcript="Kräutergarten Aibling als Dienstleister",
+            clarification_question="Neuen Kontakt anlegen?",
+            answer="Ja.",
+            settings=Settings(),
+        )
+
+    prompt = captured["prompt"]
+    assert "Kräutergarten Aibling als Dienstleister" in prompt
+    assert "Neuen Kontakt anlegen?" in prompt
+    assert "Ja." in prompt
+    assert "RÜCKFRAGE-ANTWORT" in prompt

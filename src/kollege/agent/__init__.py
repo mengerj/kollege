@@ -45,6 +45,7 @@ __all__ = [
     "filter_known_names",
     "get_known_names_context",
     "pre_warm_model",
+    "run_clarification_response",
     "run_extraction",
     "run_revision",
 ]
@@ -450,6 +451,46 @@ def run_revision(
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
     return run_extraction(
         revision_prompt, tmp_repo, settings, known_names_context=known_names_context
+    )
+
+
+def run_clarification_response(
+    original_transcript: str,
+    clarification_question: str,
+    answer: str,
+    settings: Settings,
+    known_names_context: str | None = None,
+) -> ExtractionResult:
+    """Beantwortet eine zuvor gestellte Rückfrage und extrahiert erneut.
+
+    Wenn ``run_extraction`` unsicher war, hat es eine Rückfrage (``clarification``)
+    gestellt statt zu raten. Diese Funktion führt den Dialog fort: Das LLM bekommt
+    das Ursprungstranskript, die von ihm gestellte Rückfrage und die Antwort der
+    Nutzerin (Freitext, transkribierte Sprache oder ein simples "Ja." aus einem
+    👍-Tapback) und liefert das nun aufgelöste ``ExtractionResult``.
+
+    Bei Zustimmung legt es die in der Rückfrage angebotenen Einträge an; bei
+    Ablehnung bleibt das Ergebnis leer; liefert die Antwort neue Angaben, fließen
+    sie ein. Nur bei weiterhin echter Unklarheit wird erneut eine Rückfrage gestellt.
+
+    Intern wird — wie bei ``run_revision`` — ``run_extraction`` auf einem
+    zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad und
+    Namensabgleich unverändert wiederverwendet werden.
+    """
+    response_prompt = (
+        "[RÜCKFRAGE-ANTWORT]\n"
+        f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
+        f"Deine Rückfrage an die Nutzerin:\n{clarification_question}\n\n"
+        f"Antwort der Nutzerin:\n{answer}\n\n"
+        "Setze die Extraktion jetzt vollständig um. Bei Zustimmung (z. B. »ja«, »👍«, "
+        "»passt«) lege die in der Rückfrage angebotenen Einträge an. Bei Ablehnung "
+        "(»nein«) extrahiere nichts. Liefert die Antwort zusätzliche Angaben, "
+        "berücksichtige sie. Stelle nur dann erneut eine Rückfrage, wenn weiterhin "
+        "etwas Wesentliches unklar bleibt."
+    )
+    tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
+    return run_extraction(
+        response_prompt, tmp_repo, settings, known_names_context=known_names_context
     )
 
 

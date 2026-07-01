@@ -484,6 +484,138 @@ def test_non_thumbsup_reaction_is_ignored(orc: Orchestrator, channel: MemoryChan
     assert channel.sent == []
 
 
+@pytest.mark.parametrize("emoji", ["👍", "👍🏼", "👍️", "👌", "✅"])
+def test_reaction_variants_confirm_pending(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository, emoji: str
+) -> None:
+    """👍 mit Hautton/Variation-Selector sowie 👌/✅ gelten als Bestätigung."""
+    _prime_pending(orc, channel)
+    orc.handle_message(IncomingMessage(sender=SENDER, text=emoji, is_reaction=True))
+    assert SENDER not in orc._pending
+    assert len(repo.query_open_items()) == 1
+
+
+def test_thumbsdown_reaction_rejects_pending(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """👎 auf einen offenen Vorschlag verwirft ihn (keine Persistenz)."""
+    _prime_pending(orc, channel)
+    orc.handle_message(IncomingMessage(sender=SENDER, text="👎", is_reaction=True))
+    assert SENDER not in orc._pending
+    assert repo.query_open_items() == []
+    assert "Verworfen" in channel.sent[-1][1]
+
+
+# ---------------------------------------------------------------------------
+# Rückfrage-Antwort-Schleife (Schritt 8.13)
+# ---------------------------------------------------------------------------
+
+
+def _prime_clarification(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Eine offene Rückfrage in den Pending-State bringen."""
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_clarification()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Kräutergarten anlegen"))
+    channel.sent.clear()
+
+
+def test_clarification_creates_pending_clarification(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Eine Rückfrage legt einen offenen Klärungs-Zustand an (nicht mehr Sackgasse)."""
+    _prime_clarification(orc, channel)
+    assert SENDER in orc._pending_clarifications
+    assert SENDER not in orc._pending
+    assert orc._pending_clarifications[SENDER].question == "Welches Projekt meinst du?"
+
+
+def test_thumbsup_on_clarification_triggers_response_run(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """👍 auf eine Rückfrage wird als 'Ja' beantwortet → Vorschlag entsteht."""
+    _prime_clarification(orc, channel)
+    with patch(
+        "kollege.orchestrator.run_clarification_response", return_value=_result_task()
+    ) as mock_resp:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="👍", is_reaction=True))
+    mock_resp.assert_called_once()
+    # Antwort "Ja." wird an den Klärungs-Lauf durchgereicht.
+    assert mock_resp.call_args.kwargs["answer"] == "Ja."
+    # Ergebnis wird zum normalen Vorschlag → Bestätigungs-Loop.
+    assert SENDER in orc._pending
+    assert SENDER not in orc._pending_clarifications
+    assert "📋" in channel.sent[-1][1]
+
+
+def test_text_answer_to_clarification_triggers_response_run(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Freitext-Antwort auf eine Rückfrage geht in den Klärungs-Lauf, nicht in neue Extraktion."""
+    _prime_clarification(orc, channel)
+    with (
+        patch("kollege.orchestrator.run_extraction") as mock_extract,
+        patch(
+            "kollege.orchestrator.run_clarification_response", return_value=_result_task()
+        ) as mock_resp,
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ja, als Dienstleister"))
+    mock_extract.assert_not_called()
+    mock_resp.assert_called_once()
+    assert mock_resp.call_args.kwargs["answer"] == "Ja, als Dienstleister"
+    assert SENDER in orc._pending
+
+
+def test_nein_to_clarification_discards_without_llm(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """'nein' verwirft die Rückfrage ohne LLM-Lauf."""
+    _prime_clarification(orc, channel)
+    with (
+        patch("kollege.orchestrator.run_clarification_response") as mock_resp,
+        patch("kollege.orchestrator.run_extraction") as mock_extract,
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="nein"))
+    mock_resp.assert_not_called()
+    mock_extract.assert_not_called()
+    assert SENDER not in orc._pending_clarifications
+    assert "Verworfen" in channel.sent[-1][1]
+
+
+def test_thumbsdown_on_clarification_discards(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """👎 auf eine Rückfrage verwirft sie ohne LLM-Lauf."""
+    _prime_clarification(orc, channel)
+    with patch("kollege.orchestrator.run_clarification_response") as mock_resp:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="👎", is_reaction=True))
+    mock_resp.assert_not_called()
+    assert SENDER not in orc._pending_clarifications
+    assert "Verworfen" in channel.sent[-1][1]
+
+
+def test_clarification_answer_can_ask_again(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Bleibt es nach der Antwort unklar, wird erneut eine Rückfrage gestellt."""
+    _prime_clarification(orc, channel)
+    followup = ExtractionResult(clarification="Welcher Nachname genau?")
+    with patch("kollege.orchestrator.run_clarification_response", return_value=followup):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Der Neue"))
+    assert SENDER in orc._pending_clarifications
+    assert orc._pending_clarifications[SENDER].question == "Welcher Nachname genau?"
+    assert SENDER not in orc._pending
+    assert "Rückfrage" in channel.sent[-1][1]
+
+
+def test_thumbsup_on_clarification_uses_original_transcript(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Der Klärungs-Lauf bekommt das Ursprungstranskript + die gestellte Frage."""
+    _prime_clarification(orc, channel)
+    with patch(
+        "kollege.orchestrator.run_clarification_response", return_value=_result_task()
+    ) as mock_resp:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="👍", is_reaction=True))
+    kwargs = mock_resp.call_args.kwargs
+    assert kwargs["original_transcript"] == "Kräutergarten anlegen"
+    assert kwargs["clarification_question"] == "Welches Projekt meinst du?"
+
+
 # ---------------------------------------------------------------------------
 # Dedup im Verarbeitungsfluss
 # ---------------------------------------------------------------------------

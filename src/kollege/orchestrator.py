@@ -6,11 +6,16 @@ Ablauf:
 3. Transkript → ExtractionResult (Agent, temporäres In-Memory-Repo — kein echter DB-Schreibzugriff).
 4. Vorschlag formatieren und an Nutzer senden.
 5. Bestätigung (👍 / "ja") → Persistenz im echten Repo.
-   Ablehnung ("nein") → verwerfen.
+   Ablehnung (👎 / "nein") → verwerfen.
    Zahlenauswahl ("1 3") → nur gewählte Einträge übernehmen.
 
-Pending-State: pro Absender (Rufnummer) ein ``PendingProposal`` im Arbeitsspeicher.
-Jeder Absender kann nur einen Vorschlag gleichzeitig offen haben.
+Bei Unklarheit stellt der Agent eine Rückfrage (``clarification``) statt zu raten.
+Die nächste Nachricht (Text, Sprache oder 👍-Tapback) gilt als Antwort darauf und
+wird mit dem Ursprungstranskript neu extrahiert (Rückfrage-Antwort-Schleife).
+
+Pending-State: pro Absender (Rufnummer) genau *ein* offener Zustand im
+Arbeitsspeicher — entweder ein ``PendingProposal`` (wartet auf Bestätigung) oder
+eine ``PendingClarification`` (wartet auf Antwort), nie beides gleichzeitig.
 """
 
 from __future__ import annotations
@@ -24,7 +29,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from kollege.agent import get_known_names_context, run_extraction, run_revision
+from kollege.agent import (
+    get_known_names_context,
+    run_clarification_response,
+    run_extraction,
+    run_revision,
+)
 from kollege.channels import Channel, IncomingMessage
 from kollege.config import Settings
 from kollege.db import Repository
@@ -42,6 +52,7 @@ from kollege.transcription import Transcriber
 
 __all__ = [
     "Orchestrator",
+    "PendingClarification",
     "PendingProposal",
     "dedupe_result",
     "format_proposal",
@@ -60,9 +71,40 @@ _Item = ExtractedContact | ExtractedTask | ExtractedProjectUpdate
 # Regex für Nutzereingaben im Bestätigungs-Dialog
 # ---------------------------------------------------------------------------
 
-_YES = re.compile(r"^\s*(ja|yes|👍|bestätigen?|ok|okay)\s*$", re.IGNORECASE)
+_YES = re.compile(r"^\s*(ja|yes|👍|bestätigen?|ok|okay|passt)\s*$", re.IGNORECASE)
 _NO = re.compile(r"^\s*(nein|no|abbrechen?|verwerfen?|cancel)\s*$", re.IGNORECASE)
 _NUMS = re.compile(r"^[\d\s,]+$")
+
+# Emoji-Modifikatoren, die einem Basis-Emoji folgen können: Variation Selectors
+# (U+FE0E/U+FE0F) und Hautton-Modifier (U+1F3FB–U+1F3FF). Für den Vergleich
+# entfernt, damit 👍, 👍️ und 👍🏼 identisch behandelt werden — je nach Signal-
+# Client kommt der Tapback in unterschiedlichen Kodierungen an.
+_EMOJI_MODIFIERS = re.compile(r"[\ufe0e\ufe0f\U0001f3fb-\U0001f3ff]")
+
+# Tapback-Emojis, die als Zustimmung ("ja") gelten.
+_AFFIRMATIVE_EMOJIS = frozenset({"👍", "👌", "✅", "🆗"})
+# Tapback-Emojis, die als Ablehnung ("nein") gelten.
+_NEGATIVE_EMOJIS = frozenset({"👎", "❌", "🚫"})
+
+
+def _emoji_base(emoji: str) -> str:
+    """Emoji auf seinen Basis-Codepoint reduzieren (Modifier/Selektoren entfernen)."""
+    return _EMOJI_MODIFIERS.sub("", emoji).strip()
+
+
+def _is_affirmative_reaction(emoji: str | None) -> bool:
+    """True, wenn das Tapback-Emoji als Zustimmung zu werten ist (robust ggü. Varianten)."""
+    if not emoji:
+        return False
+    return _emoji_base(emoji) in _AFFIRMATIVE_EMOJIS
+
+
+def _is_negative_reaction(emoji: str | None) -> bool:
+    """True, wenn das Tapback-Emoji als Ablehnung zu werten ist (robust ggü. Varianten)."""
+    if not emoji:
+        return False
+    return _emoji_base(emoji) in _NEGATIVE_EMOJIS
+
 
 # Anzahl Versuche und Standard-Wartezeit (Sekunden) bei transienten Extraktionsfehlern.
 # Transient = Ollama/Whisper/Container kurzfristig nicht erreichbar.
@@ -94,6 +136,23 @@ class PendingProposal:
     genauen Vorschlag. In Phase-A wird per Sender nur ein Vorschlag offen gehalten,
     daher ist jede Quote-Reply eindeutig — der Timestamp dient als Vorbereitung auf
     Stufe B (Korrektur bereits persistierter Einträge)."""
+
+
+@dataclass
+class PendingClarification:
+    """Offene Rückfrage, die auf eine Antwort der Nutzerin wartet.
+
+    Entsteht, wenn die Extraktion unsicher war und ``clarification`` gesetzt hat
+    (statt zu raten, Designprinzip 3). Die *nächste* Nachricht der Nutzerin
+    (Text, Sprache oder ein 👍-Tapback) wird als Antwort behandelt und mit dem
+    Ursprungstranskript neu extrahiert — statt als neue Notiz. Pro Sender ist
+    maximal eine Rückfrage *oder* ein Vorschlag offen, nie beides gleichzeitig.
+    """
+
+    sender: str
+    transcript: str
+    question: str
+    created_at: datetime = field(default_factory=_now)
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +360,7 @@ class Orchestrator:
         self._settings = settings
         self._log_dir = log_dir
         self._pending: dict[str, PendingProposal] = {}
+        self._pending_clarifications: dict[str, PendingClarification] = {}
         self._retry_delay = retry_delay
 
     # ---------------------------------------------------------------------- #
@@ -311,20 +371,18 @@ class Orchestrator:
         """Eine eingehende Nachricht verarbeiten (synchron, blockierend)."""
         kind = "Reaktion" if msg.is_reaction else ("Audio" if msg.audio_path else "Text")
         logger.info(
-            "Eingang von %s (%s, pending=%s)",
+            "Eingang von %s (%s, pending=%s, rückfrage=%s)",
             msg.sender,
             kind,
             msg.sender in self._pending,
+            msg.sender in self._pending_clarifications,
         )
 
-        # Tapback-Reaktion (👍) auf einen Vorschlag = Bestätigung. Andere
-        # Reaktionen oder Reaktionen ohne offenen Vorschlag werden ignoriert
-        # (sie sind keine Sprachnotiz und sollen nicht extrahiert werden).
+        # Tapback-Reaktion (👍/👎): auf einen offenen Vorschlag = Bestätigung/Ablehnung,
+        # auf eine offene Rückfrage = Ja/Nein-Antwort. Reaktionen ohne offenen
+        # Zustand oder mit neutralem Emoji werden ignoriert (keine Extraktion).
         if msg.is_reaction:
-            if msg.sender in self._pending and msg.text and _YES.match(msg.text.strip()):
-                self._confirm(msg.sender, indices=None)
-            else:
-                logger.info("Reaktion ignoriert (kein 👍 auf offenen Vorschlag)")
+            self._handle_reaction(msg)
             return
 
         # Ist dies eine Antwort auf einen ausstehenden Vorschlag?
@@ -349,6 +407,16 @@ class Orchestrator:
             self._revise(msg.sender, msg)
             return
 
+        # Antwort auf eine offene Rückfrage (Text oder Sprache): mit dem
+        # Ursprungstranskript neu extrahieren, statt als neue Notiz zu behandeln
+        # (Schritt 8.13). Ein explizites "nein" verwirft die Rückfrage ohne LLM-Lauf.
+        if msg.sender in self._pending_clarifications:
+            if msg.text and _NO.match(msg.text.strip()):
+                self._discard_clarification(msg.sender)
+                return
+            self._answer_clarification(msg.sender, msg=msg)
+            return
+
         # Normaler Ablauf: Transkript holen → extrahieren → Vorschlag schicken
         # Sofort-Quittung — knappe Bestätigung vor der langsamen Verarbeitung
         # (Transkription kann Minuten dauern, LLM-Extraktion ebenfalls).
@@ -365,6 +433,15 @@ class Orchestrator:
 
         if result.clarification:
             logger.info("Extraktion: Rückfrage gestellt")
+            # Rückfrage merken, damit die nächste Nachricht als Antwort gilt
+            # (Schritt 8.13). Etwaigen alten Vorschlag verwerfen — pro Sender
+            # ist genau ein offener Zustand erlaubt.
+            self._pending.pop(msg.sender, None)
+            self._pending_clarifications[msg.sender] = PendingClarification(
+                sender=msg.sender,
+                transcript=transcript,
+                question=result.clarification,
+            )
             self._channel.send(msg.sender, f"Rückfrage: {result.clarification}")
             return
 
@@ -426,6 +503,32 @@ class Orchestrator:
     # Interne Methoden                                                         #
     # ---------------------------------------------------------------------- #
 
+    def _handle_reaction(self, msg: IncomingMessage) -> None:
+        """Tapback-Reaktion (👍/👎) auf Vorschlag oder Rückfrage auswerten.
+
+        - 👍 auf Vorschlag → bestätigen; auf Rückfrage → als "Ja" beantworten.
+        - 👎 auf Vorschlag → ablehnen; auf Rückfrage → verwerfen.
+        - Neutrales Emoji oder kein offener Zustand → ignorieren (keine Extraktion).
+        """
+        emoji = msg.text
+        if _is_affirmative_reaction(emoji):
+            if msg.sender in self._pending:
+                self._confirm(msg.sender, indices=None)
+            elif msg.sender in self._pending_clarifications:
+                self._answer_clarification(msg.sender, answer="Ja.")
+            else:
+                logger.info("Reaktion 👍 ignoriert (kein offener Vorschlag / keine Rückfrage)")
+            return
+        if _is_negative_reaction(emoji):
+            if msg.sender in self._pending:
+                self._reject(msg.sender)
+            elif msg.sender in self._pending_clarifications:
+                self._discard_clarification(msg.sender)
+            else:
+                logger.info("Reaktion 👎 ignoriert (kein offener Vorschlag / keine Rückfrage)")
+            return
+        logger.info("Reaktion ignoriert (neutrales Emoji)")
+
     def _get_transcript(self, msg: IncomingMessage) -> str | None:
         """Text aus Nachricht holen: direkt oder via Transcriber (für Audio)."""
         if msg.audio_path is not None and self._transcriber is not None:
@@ -472,6 +575,92 @@ class Orchestrator:
     def _reject(self, sender: str) -> None:
         self._pending.pop(sender)
         self._channel.send(sender, "Verworfen. Keine Änderungen gespeichert.")
+
+    def _discard_clarification(self, sender: str) -> None:
+        self._pending_clarifications.pop(sender, None)
+        self._channel.send(sender, "Verworfen. Keine Änderungen gespeichert.")
+
+    def _answer_clarification(
+        self,
+        sender: str,
+        answer: str | None = None,
+        msg: IncomingMessage | None = None,
+    ) -> None:
+        """Beantwortet eine offene Rückfrage und erzeugt daraus einen Vorschlag.
+
+        ``answer`` ist entweder direkt gesetzt (z. B. ``"Ja."`` aus einem 👍-Tapback)
+        oder wird aus ``msg`` abgeleitet (Freitext oder transkribierte Sprache). Das
+        Ergebnis durchläuft denselben Pfad wie eine normale Extraktion: konkrete
+        Einträge → Vorschlag mit Bestätigungs-Loop, erneute Unklarheit → neue Rückfrage,
+        leeres Ergebnis (z. B. Ablehnung) → Klärung verwerfen.
+        """
+        pending = self._pending_clarifications[sender]
+
+        # Sofort-Quittung + Antworttext bestimmen.
+        if answer is None and msg is not None:
+            if msg.audio_path is not None and self._transcriber is not None:
+                self._channel.send(sender, "🎤 Antwort erhalten, ich verarbeite das kurz …")
+            else:
+                self._channel.send(sender, "📝 Antwort erhalten, ich verarbeite das kurz …")
+            answer = self._get_transcript(msg)
+        else:
+            self._channel.send(sender, "👍 Verstanden, ich bereite den Eintrag vor …")
+
+        if answer is None or not answer.strip():
+            self._channel.send(
+                sender, "Ich konnte die Antwort nicht lesen. Bitte erneut versuchen."
+            )
+            return
+
+        logger.info("Rückfrage-Antwort-Lauf für %s: %r", sender, answer[:80])
+        known_names = get_known_names_context(self._repo)
+        try:
+            result = dedupe_result(
+                run_clarification_response(
+                    original_transcript=pending.transcript,
+                    clarification_question=pending.question,
+                    answer=answer,
+                    settings=self._settings,
+                    known_names_context=known_names,
+                )
+            )
+        except Exception:
+            logger.exception("Fehler beim Rückfrage-Antwort-Lauf für %s", sender)
+            self._channel.send(
+                sender,
+                "⚠ Beim Verarbeiten der Antwort ist ein Fehler aufgetreten. Bitte erneut.",
+            )
+            return
+
+        # Weiterhin unklar → Rückfrage aktualisieren, Klärung bleibt offen.
+        if result.clarification:
+            logger.info("Rückfrage-Antwort: erneute Rückfrage")
+            self._pending_clarifications[sender] = PendingClarification(
+                sender=sender,
+                transcript=pending.transcript,
+                question=result.clarification,
+            )
+            self._channel.send(sender, f"Rückfrage: {result.clarification}")
+            return
+
+        # Ab hier ist die Klärung abgeschlossen (bestätigt oder abgelehnt).
+        self._pending_clarifications.pop(sender, None)
+
+        if result.is_empty():
+            logger.info("Rückfrage-Antwort: nichts Konkretes erkannt")
+            self._channel.send(sender, "Ich konnte nichts Konkretes erkennen.")
+            return
+
+        # Konkrete Einträge → normaler Vorschlag mit Bestätigungs-Loop.
+        proposal = PendingProposal(sender=sender, transcript=pending.transcript, result=result)
+        proposal.sent_timestamp = self._channel.send(sender, format_proposal(result))
+        self._pending[sender] = proposal
+        logger.info(
+            "Rückfrage-Antwort: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s)",
+            len(result.contacts),
+            len(result.tasks),
+            len(result.project_updates),
+        )
 
     def _revise(self, sender: str, msg: IncomingMessage) -> None:
         """Korrektur-Lauf: revidiert den offenen Vorschlag anhand der Quote-Reply.
