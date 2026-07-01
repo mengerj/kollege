@@ -5,6 +5,74 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-01 — Schritt 8.10 — Eval-Set für Extraktionsqualität (automatische Session)
+
+**Ziel:** Kleines Fixture-Set aus Beispiel-Transkripten → erwartete Felder,
+damit Modell-/Prompt-Wechsel messbar werden und Regressionen in
+Dedup/Datumsauflösung/Vokabular-Bias frühzeitig auffallen.
+
+**Getan:**
+
+### Fixture-Dateien
+- **5 JSON-Fixtures** in [`tests/fixtures/eval/`](tests/fixtures/eval/):
+  1. `01_wagner_pflanzplan.json` — Privatkundin + Task + Projektbezug + Frist
+  2. `02_stadtpark_gemeinde.json` — Projektstatus-Update, Gemeinde als Wartegrund
+  3. `03_gartenprofi_anruf.json` — Dienstleister-Kontakt + konkreter Anruf-Task
+  4. `04_schneider_angebot.json` — Kontakt mit Projektreferenz + termingebundener Task
+  5. `05_zwei_aufgaben.json` — Zwei klar getrennte Aufgaben, zwei Kontakte
+- Jedes Fixture: `{ id, description, transcript, expected: { min_contacts, contact_names, min_tasks, task_keywords, min_project_updates, project_names } }`
+
+### Eval-Testmodul
+- **[`tests/test_eval.py`](tests/test_eval.py)**: Parametrisierte Tests mit `@pytest.mark.eval`.
+  - **CI-Modus (Standard):** `FunctionModel`-Mock gibt erwartetes Ergebnis zurück.
+    Prüft Schema-Konformität und Mindest-Counts. Schnell, kein Netz, kein LLM.
+  - **Real-LLM-Modus** (`pytest -m eval --real-llm`): Echter `run_extraction()`-Aufruf.
+    `_score_result()` berechnet Trefferquote (Hits/Gesamt) über Mindestanzahlen und
+    Schlüsselwort-Teilstrings (case-insensitive). Schwellenwert: 50 %.
+    Detailliertes Print-Output zeigt extrahierte Kontakte/Tasks/Projekte pro Fixture.
+- **`_score_result(result, expected) → (int, int)`**: Schwellenwert-Scoring statt
+  striktem Equality-Assert — trägt LLM-Nichtdeterminismus Rechnung.
+
+### conftest.py
+- **[`tests/conftest.py`](tests/conftest.py)**: `--real-llm`-Option via `pytest_addoption`
+  + `real_llm`-Fixture (bool), das in `test_eval.py` per Injection übergeben wird.
+
+### Aufräumen
+- Eval-Abschnitt aus [`tests/test_agent.py`](tests/test_agent.py) entfernt
+  (wurde durch das neue `test_eval.py` ersetzt; `test_agent.py` bleibt auf
+  Agent-Struktur-/Tool-Tests fokussiert).
+- `eval`-Marker in [`pyproject.toml`](pyproject.toml) registriert.
+
+### Tests
+- **5 neue Eval-Tests** (`test_eval_extraction[…]`, parametrisiert) ersetzten 3 alte.
+- **175 Tests grün**, ruff + mypy-strict sauber.
+
+**Befehle:**
+```bash
+# CI-Modus (in Standard-Run enthalten):
+uv run pytest -m eval
+
+# Real-LLM-Modus (Trefferquote):
+uv run pytest -m eval --real-llm -s
+```
+
+**Entscheidungen:**
+- **Eval-Tests laufen in CI (kein Ausschluss aus `addopts`):** Die FunctionModel-Mocks
+  validieren Pipeline und Schema auch ohne LLM — sinnvoller als stilles Überspringen.
+- **Schwellenwert 50 %:** Konservativ genug für kleinere lokale Modelle (qwen2.5:7b,
+  ornith:9b), aber erkennt grobe Regressionen zuverlässig. Anpassbar über
+  `_QUALITY_THRESHOLD` in `test_eval.py`.
+- **Teilstring-Match (case-insensitive):** Verhindert False Negatives bei Formulierungen
+  wie „Frau Gartenprofi GmbH anrufen" vs. erwartetem Keyword „Gartenprofi".
+
+**Offene Punkte / nächste Schritte:**
+- Eval gegen echte Modelle (`ornith:9b`, `qwen2.5:7b`) manual laufen lassen und
+  Trefferquoten dokumentieren (erster Messwert-Baseline).
+- Schritt 8.10 abgeschlossen. Nächster Schritt: je nach Alltags-Feedback Schritt 8.5
+  (Edge-Cases live) oder Phase 2 (IMAP, Schritt 9).
+
+---
+
 ## 2026-07-01 — Schritt 8.9 — Robuster Dauerbetrieb (automatische Session)
 
 **Ziel:** Den Bot unbeaufsichtigt und stabil laufen lassen: Auto-Restart,

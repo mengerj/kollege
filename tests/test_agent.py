@@ -3,8 +3,8 @@
 Strategie:
 - ``TestModel(call_tools=[])`` — Agent-Struktur ohne Tool-Aufrufe prüfen.
 - ``FunctionModel`` — kontrollierte Tool-Aufrufe + DB-Seiteneffekte prüfen.
-- Eval-Set — Fixture-Transkripte → ExtractionResult-Smoke-Test.
 
+Eval-Set (Fixture-Transkripte) lebt in ``tests/test_eval.py``.
 Kein echter LLM-Aufruf, kein Netzwerk: CI-sicher.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import TypedDict
 
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
@@ -23,9 +22,6 @@ from kollege.agent import agent, build_model
 from kollege.config import LLMProvider, Settings
 from kollege.db import Repository
 from kollege.models import (
-    ExtractedContact,
-    ExtractedProjectUpdate,
-    ExtractedTask,
     ExtractionResult,
     Task,
     TaskSource,
@@ -214,77 +210,3 @@ def test_query_open_items_tool_returns_string() -> None:
 
     model = _make_tool_model("query_open_items", {})
     agent.run_sync("...", model=model, deps=repo)
-
-
-# --------------------------------------------------------------------------- #
-# Eval-Set (Smoke-Tests mit Fixture-Transkripten)                               #
-# --------------------------------------------------------------------------- #
-
-
-class _Fixture(TypedDict, total=False):
-    transcript: str
-    min_contacts: int
-    min_tasks: int
-    min_project_updates: int
-
-
-_FIXTURES: list[_Fixture] = [
-    {
-        "transcript": (
-            "Ich hab gerade mit der Frau Wagner telefoniert, Privatkundin. "
-            "Sie braucht bis Ende Juli einen Pflanzplan für ihren Vorgarten. "
-            "Das Projekt heißt Vorgarten Wagner."
-        ),
-        "min_contacts": 1,
-        "min_tasks": 1,
-    },
-    {
-        "transcript": (
-            "Beim Stadtpark-Projekt warten wir jetzt auf die Gemeinde Bergheim. "
-            "Status ist Planung. Nächste Aktion: Genehmigung abwarten."
-        ),
-        "min_contacts": 0,
-        "min_tasks": 0,
-        "min_project_updates": 1,
-    },
-    {
-        "transcript": (
-            "Ich muss morgen den Dienstleister Gartenprofi GmbH anrufen "
-            "und den Liefertermin für die Stauden klären."
-        ),
-        "min_contacts": 1,
-        "min_tasks": 1,
-    },
-]
-
-
-def _make_eval_model(expected: ExtractionResult) -> FunctionModel:
-    """FunctionModel, das eine vorgegebene ExtractionResult zurückgibt."""
-    expected_json = expected.model_dump_json()
-
-    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart(tool_name="final_result", args=expected_json)])
-
-    return FunctionModel(fn)
-
-
-@pytest.mark.parametrize("fixture", _FIXTURES)
-def test_eval_extraction_result_schema_valid(fixture: _Fixture) -> None:
-    """ExtractionResult aus Fixture-Transkript ist schemakonform."""
-    repo = _repo()
-    n_contacts = fixture.get("min_contacts", 0)
-    n_tasks = fixture.get("min_tasks", 0)
-    n_updates = fixture.get("min_project_updates", 0)
-
-    contacts = [ExtractedContact(name="Test Kontakt")] * n_contacts
-    tasks = [ExtractedTask(title="Test Aufgabe")] * n_tasks
-    updates = [ExtractedProjectUpdate(project="Test Projekt")] * n_updates
-    expected = ExtractionResult(contacts=contacts, tasks=tasks, project_updates=updates)
-    model = _make_eval_model(expected)
-
-    result = agent.run_sync(str(fixture.get("transcript", "")), model=model, deps=repo)
-    out = result.output
-    assert isinstance(out, ExtractionResult)
-    assert len(out.contacts) >= n_contacts
-    assert len(out.tasks) >= n_tasks
-    assert len(out.project_updates) >= n_updates

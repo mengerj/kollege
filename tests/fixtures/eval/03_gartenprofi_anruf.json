@@ -1,0 +1,13 @@
+{
+  "id": "gartenprofi_anruf",
+  "description": "Dienstleister-Kontakt + konkreter Anruf-Task",
+  "transcript": "Ich muss morgen den Dienstleister Gartenprofi GmbH anrufen und den Liefertermin für die Stauden klären.",
+  "expected": {
+    "min_contacts": 1,
+    "contact_names": ["Gartenprofi"],
+    "min_tasks": 1,
+    "task_keywords": ["anrufen", "Liefertermin", "Gartenprofi"],
+    "min_project_updates": 0,
+    "project_names": []
+  }
+}
