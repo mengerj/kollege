@@ -1,0 +1,30 @@
+{
+  "id": "schmidt_namenskorrektur",
+  "description": "Klassischer Whisper-Namensverhörer (Motiv aus Schritt 8.6/8.7): Kontaktname wird per Zitat-Antwort korrigiert.",
+  "tags": ["revision", "correction-not-applied"],
+  "original_transcript": "Herr Schnitt hat angerufen wegen des Angebots für den Vorgarten.",
+  "current_result": {
+    "contacts": [{ "name": "Schnitt", "type": null, "email": null, "phone": null, "notes": null }],
+    "tasks": [
+      {
+        "title": "Angebot für Vorgarten an Herrn Schnitt",
+        "contact": "Schnitt",
+        "project": null,
+        "due": null,
+        "time_window": null
+      }
+    ],
+    "project_updates": [],
+    "clarification": null
+  },
+  "correction": "Das ist nicht Herr Schnitt, sondern Herr Schmidt.",
+  "known_names": ["Schmidt"],
+  "expected": {
+    "min_contacts": 1,
+    "contact_names": ["Schmidt"],
+    "min_tasks": 1,
+    "max_tasks": 1,
+    "forbidden_keywords": ["Schnitt"],
+    "must_not_be_empty": true
+  }
+}

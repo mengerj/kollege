@@ -333,6 +333,17 @@ def build_model(settings: Settings) -> Model:
         return OllamaModel(settings.llm_model, provider=provider)
     if settings.llm_provider == LLMProvider.ANTHROPIC:
         return AnthropicModel(settings.llm_model, provider=AnthropicProvider())
+    if settings.llm_provider == LLMProvider.OPENROUTER:
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        return OpenAIChatModel(
+            settings.llm_model,
+            provider=OpenAIProvider(
+                base_url=settings.openrouter_base_url,
+                api_key=settings.openrouter_api_key,
+            ),
+        )
     # OpenAI-Fallback
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider

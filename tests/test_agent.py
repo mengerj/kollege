@@ -96,6 +96,20 @@ def test_build_model_returns_openai_model(monkeypatch: pytest.MonkeyPatch) -> No
     assert isinstance(model, OpenAIChatModel)
 
 
+def test_build_model_returns_openrouter_model() -> None:
+    """build_model() erzeugt bei Provider=OPENROUTER ein OpenAIChatModel (OpenAI-kompatibel)."""
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    settings = Settings.model_construct(
+        llm_provider=LLMProvider.OPENROUTER,
+        llm_model="mistralai/mistral-large",
+        openrouter_base_url="https://openrouter.ai/api/v1",
+        openrouter_api_key="sk-or-dummy",
+    )
+    model = build_model(settings)
+    assert isinstance(model, OpenAIChatModel)
+
+
 # --------------------------------------------------------------------------- #
 # Tool-Tests via FunctionModel                                                  #
 # --------------------------------------------------------------------------- #

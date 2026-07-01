@@ -8,6 +8,8 @@
     "min_tasks": 0,
     "task_keywords": [],
     "min_project_updates": 1,
-    "project_names": ["Stadtpark"]
+    "max_project_updates": 2,
+    "project_names": ["Stadtpark"],
+    "must_not_be_empty": true
   }
 }

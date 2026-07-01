@@ -15,6 +15,7 @@ class LLMProvider(StrEnum):
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    OPENROUTER = "openrouter"
 
 
 class Settings(BaseSettings):
@@ -29,6 +30,12 @@ class Settings(BaseSettings):
     llm_provider: LLMProvider = LLMProvider.OLLAMA
     llm_model: str = "qwen2.5:7b-instruct"
     ollama_base_url: str = "http://localhost:11434/v1"
+
+    # OpenRouter — bequemes Benchmark-Backend (8.11): ein Key, viele Modelle
+    # (OpenAI-kompatibel). Nur für die Entdeckungsphase mit synthetischen
+    # Fixtures gedacht, kein DSGVO-Fundament für die Produktion (siehe 8.12).
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_api_key: str | None = None
 
     # Storage.
     db_path: str = "data/kollege.db"

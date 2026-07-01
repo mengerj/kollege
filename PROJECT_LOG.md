@@ -5,6 +5,101 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-01 — Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision)
+
+**Auslöser:** Live-Debugging desselben Tages — eine triviale Rechtschreibkorrektur
+(„Es heißt Aibling, nicht Eibling") lief nicht-deterministisch ins Leere, reproduzierbar
+bei `ornith:9b` **und** `qwen2.5:7b-instruct`. Das bestehende Eval-Set (8.10) konnte das
+nicht sichtbar machen (Einzel-Lauf, nur `min_*`, kein Revisions-Pfad).
+
+**Getan:**
+
+### Eval-Paket `src/kollege/eval/` (Single Source of Truth)
+- `fixtures.py` — Pydantic-Schema + Laden für beide Fixture-Familien (Extraktion +
+  neu: Revision). Alle neuen Keys optional, abwärtskompatibel.
+- `scoring.py` — deklarativer Scorer: `expected` → `FixtureScore` (hits/total + Flags
+  `empty`, `over_extraction`, `forbidden_hit`).
+- `runner.py` — `run_fixture_n_times()`: N Wiederholungen + Aggregation
+  (`pass_rate`, `mean_score`, `empty_rate`, `over_extraction_rate`, `error_rate`,
+  Latenz-Median). Optionales `max_workers` für parallele Wiederholungen bei
+  netzwerkgebundenen Cloud-Providern.
+- `tests/test_eval_scoring.py` — 24 deterministische Unit-Tests (kein LLM).
+
+### Fixture-Schema erweitert
+- Extraktion: `max_contacts/max_tasks/max_project_updates` (Über-Extraktion),
+  `forbidden_keywords`, `must_not_be_empty`. Bestehende 5 Fixtures ergänzt.
+- **`04_schneider_angebot.json` entfernt** — near-duplicate zu `01_wagner_pflanzplan`
+  (beide „Kontakt + ein Task + Frist"), kein zusätzliches Signal fürs teure Benchmarking.
+- **Neu: `tests/fixtures/eval_revision/`** — zwei Fixtures: der Aibling-Fall
+  (`forbidden_keywords: ["Eibling"]`, `must_not_be_empty: true`) und ein
+  Namenskorrektur-Fall (Schnitt→Schmidt, Motiv aus 8.6/8.7).
+
+### Benchmark-CLI `scripts/benchmark_models.py`
+- `--models` (Syntax `provider:modell`, Default-Provider `ollama`), `--runs`,
+  `--suite extraction,revision`, `--out`, `--threshold`, `--concurrency`.
+- Nutzt exakt den Produktions-Pfad (`run_extraction`/`run_revision`).
+- Terminal-Vergleichs-Matrix + Markdown-Historie nach `benchmarks/results/`.
+- **`--concurrency N`** parallelisiert Wiederholungen über Threads — nur für
+  Nicht-Ollama-Provider wirksam (bei `ollama` erzwungen seriell: ein lokaler
+  GPU-Server profitiert nicht von parallelen Anfragen).
+
+### Neuer Provider: OpenRouter
+- `LLMProvider.OPENROUTER` in `config.py` (+ `openrouter_base_url`/`openrouter_api_key`),
+  `build_model()`-Zweig (OpenAI-kompatibel). Bewusst **kein** Produktions-Fundament
+  (US-Intermediär, kein EU-AVV) — nur für die synthetische Benchmark-Entdeckungsphase,
+  siehe 8.12.
+
+### Dokumentation
+- `docs/benchmark.md` — Motiv (vier Fehlerklassen), Architektur, Fixture-Wachstumspfad,
+  Modell-Registrierung, Befehle, Ergebnis-Interpretation, Kosten-Hinweis (warum ein
+  Benchmark-Lauf viele Modell-Aufrufe braucht: N Reps × Fixtures × Primär-/Fallback-Retries).
+- Querverweis aus `docs/live-testing-guide.md` §5 auf den Aibling-Fall.
+
+### Baseline eingecheckt
+- Ursprünglich lokal (`ornith:9b` vs. `qwen2.5:7b-instruct`) gestartet, aber abgebrochen —
+  auf einer GPU seriell und mit den bekannten Primär-Pfad-Retries pro Lauf zu teuer für eine
+  schnelle Session-Baseline (5 Fixtures × 2 Suiten × 5 Runs × 2 Modelle, dazu bei `ornith`
+  fast immer ein gescheiterter Primär-Versuch **vor** dem eigentlichen Fallback-Versuch).
+  Stattdessen fünf **OpenRouter**-Modelle verglichen (netzwerkgebunden, mit
+  `--concurrency` parallelisierbar, synthetische Fixtures → datenschutzrechtlich
+  unkritisch): `mistral-medium-3-5`, `mistral-medium-3`, `mistral-small-2603`,
+  `qwen-2.5-7b-instruct`, `glm-4.5-air`. In `benchmarks/results/` eingecheckt.
+  - `mistral-medium-3-5`: 100 % pass_rate auf beiden Suiten, niedrigste Latenz (2–4 s median).
+  - `mistral-medium-3`: 100 %/100 % pass_rate, etwas langsamer.
+  - `glm-4.5-air`: 65 % pass_rate Extraktion (hohe `error_rate`, keine leeren/über-extrahierten
+    Ergebnisse wenn erfolgreich), 100 % Revision.
+  - `mistral-small-2603`: 55 % pass_rate Extraktion, 40 % `empty_rate` — zu schwach.
+  - `qwen-2.5-7b-instruct` (über OpenRouter): 0 % — 100 % `error_rate` auf allen Fixtures,
+    vermutlich ein Endpoint-/Formatierungsproblem bei diesem Modell auf OpenRouter (nicht
+    weiter untersucht, außerhalb des Scopes dieses Schritts).
+  - Der lokale ornith/qwen-Vergleich aus dem Live-Vorfall bleibt mit demselben Befehl
+    (`--models ornith:9b,qwen2.5:7b-instruct`) jederzeit nachvollziehbar; die CLI wurde
+    dagegen einzeln smoke-getestet (echter Ollama-Aufruf, korrekte Matrix/Markdown-Ausgabe).
+
+### Tests
+- **199 Tests grün** (vorher 198; +24 neue Scoring/Runner-Unit-Tests, +1 Revisions-Eval-Test
+  über das neue Fixture-Set, −1 durch entfernte `schneider_angebot`-Fixture, +1 Build-Model-Test
+  für OpenRouter). `ruff`/`mypy --strict`/`pytest` grün.
+
+**Entscheidungen:**
+- **Kein CI-Gate gegen echte Modelle** — Benchmark bleibt manuell (`scripts/benchmark_models.py`,
+  `pytest -m eval --real-llm`), wie bei 8.10.
+- **`--concurrency` nur für Cloud-Provider** — lokales Ollama läuft immer seriell, weil eine
+  GPU ohnehin nur eine Anfrage gleichzeitig verarbeitet; Parallelität würde dort nur um
+  dieselbe Ressource konkurrieren statt Zeit zu sparen.
+- **Fixture-Set bewusst schlank gehalten** — ein Duplikat entfernt statt ergänzt, weil jeder
+  zusätzliche Fixture die Benchmark-Kosten (N × Modelle) linear erhöht, ohne bei Redundanz
+  zusätzliches Signal zu liefern.
+
+**Offene Punkte:**
+- Der lokale `ornith:9b`-vs-`qwen2.5:7b-instruct`-Vollständigkeits-Lauf (ursprünglich in der
+  DoD als Baseline vorgesehen) wurde nicht zu Ende gefahren — bei Bedarf jederzeit mit
+  `uv run python scripts/benchmark_models.py --models ornith:9b,qwen2.5:7b-instruct --runs 5`
+  nachholbar.
+- Warum `qwen-2.5-7b-instruct` über OpenRouter komplett fehlschlägt, ist ungeklärt.
+
+---
+
 ## 2026-07-01 — Schritt 8.10 — Eval-Set für Extraktionsqualität (automatische Session)
 
 **Ziel:** Kleines Fixture-Set aus Beispiel-Transkripten → erwartete Felder,

@@ -1,0 +1,29 @@
+{
+  "id": "aibling_rechtschreibkorrektur",
+  "description": "Live-Fehlerfall vom 2026-07-01 (Schritt 8.11-Auslöser): einfache Rechtschreibkorrektur eines Whisper-Verhörers führte bei ornith:9b und qwen2.5:7b-instruct nicht-deterministisch zu 'nichts erkannt'. Bindet die konkrete Fehlerklasse als Wächter ein.",
+  "tags": ["revision", "correction-not-applied", "flakiness"],
+  "original_transcript": "Ich muss noch den Kunden in Eibling wegen der Terrasse anrufen.",
+  "current_result": {
+    "contacts": [],
+    "tasks": [
+      {
+        "title": "Kunde in Eibling wegen Terrasse anrufen",
+        "contact": null,
+        "project": null,
+        "due": null,
+        "time_window": null
+      }
+    ],
+    "project_updates": [],
+    "clarification": null
+  },
+  "correction": "Es heißt Aibling, nicht Eibling.",
+  "known_names": [],
+  "expected": {
+    "min_tasks": 1,
+    "max_tasks": 1,
+    "task_keywords": ["Aibling"],
+    "forbidden_keywords": ["Eibling"],
+    "must_not_be_empty": true
+  }
+}
