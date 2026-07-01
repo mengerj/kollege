@@ -12,21 +12,26 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Phase 1.5 ist weitgehend abgeschlossen. Empfehlung: Alltags-Trockenlauf.**
+**Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision).**
 
-Schritt 8.10 (Eval-Set) ist erledigt. Phase 1.5 hat jetzt:
-- Korrektur-/Revisions-Schleife (8.6) ✅
-- Bekannte-Namen-Kontext (8.7) ✅
-- Sofort-Quittung (8.8) ✅
-- Robuster Dauerbetrieb / launchd (8.9) ✅
-- Eval-Set (8.10) ✅
+**Auslöser (Live-Debugging 2026-07-01).** Eine simple Rechtschreibkorrektur
+(„Es heißt Aibling, nicht Eibling") lief live ins Leere („nichts erkannt"). Die
+Ursachenanalyse zeigte: Das Modell *versteht* die Korrektur einwandfrei, scheitert
+aber **nicht-deterministisch** am strukturierten/Tool-Output. Ein A/B-Test ergab,
+dass **beide** lokalen Modelle (`ornith:9b`, `qwen2.5:7b-instruct`) auf dem
+Korrektur-Prompt flaky sind und denselben Leer-Fehlerfall reproduzieren. Bevor
+blind ein Modell gewählt wird (lokal vs. API), braucht es eine **datengetriebene
+Grundlage**. Das bestehende Eval-Set (8.10) kann das nicht beantworten: nur
+Extraktion, Einzel-Lauf (Flakiness unsichtbar), nur `min_*` (Über-Extraktion wird
+belohnt), keine Revisions-Abdeckung, kein Modellvergleich.
 
-**Empfohlener nächster Schritt:** Echten Alltags-Betrieb starten und Eval-Baseline
-dokumentieren (`pytest -m eval --real-llm -s`). Danach auf Basis der Erfahrungen
-entscheiden: Edge-Cases aus 8.5 live grün machen oder Phase 2 (IMAP, Schritt 9)
-beginnen.
+**Ziel:** ein wachstumsfähiges, dokumentiertes Benchmark-System, das mehrere
+Modelle reproduzierbar auf Extraktions- **und** Korrektur-Qualität vergleicht,
+mit Fokus auf die real beobachteten Fehlerklassen (Flakiness, Über-Extraktion,
+„nichts erkannt", nicht angewandte Korrektur). Details unten in Schritt 8.11.
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
+> Schritt 8.5 (restliche Live-Edge-Cases) läuft parallel weiter.
 
 ---
 
@@ -49,6 +54,8 @@ beginnen.
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
+| 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ▶ nächster Schritt |
+| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen (nutzt 8.11) |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -275,6 +282,175 @@ erwartetem Output. [`tests/test_eval.py`](tests/test_eval.py) mit `@pytest.mark.
 - Manuell: `pytest -m eval --real-llm -s` → Trefferquote pro Fixture (Schwellenwert 50 %).
 **DoD:** ✅ `uv run pytest -m eval --real-llm -s` zeigt Trefferquote; 175 Tests grün.
 
+### Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision) ▶
+
+**Motiv (aus dem Live-Debugging 2026-07-01).** Eine triviale Rechtschreibkorrektur
+(„Es heißt Aibling, nicht Eibling") auf einen offenen Vorschlag lief live ins Leere
+(„Nach der Korrektur konnte ich nichts Konkretes erkennen"). Die reproduzierte
+Ursachenanalyse ergab drei Dinge:
+1. Das Modell **versteht** die Korrektur inhaltlich einwandfrei (roher Fließtext ist
+   in allen Varianten korrekt, mit und ohne Bekannte-Namen-Kontext).
+2. Der **Primär-Pfad** (strukturierter `final_result`-Output) scheitert bei `ornith:9b`
+   praktisch **immer** (`UnexpectedModelBehavior: Exceeded maximum output retries`).
+   Alles hängt am Fallback-Pfad (freies Tool-Calling), der **nicht-deterministisch**
+   ist: mal korrekt, mal Über-Extraktion, mal **leer** → „nichts erkannt".
+3. Ein A/B-Test gegen `qwen2.5:7b-instruct` zeigte **dieselbe** Flakiness inkl. des
+   Leer-Fehlerfalls. „Struktur einhalten" ist eine **Protokoll-Fähigkeit** (sauber
+   geformte Tool-Calls), getrennt vom Sprachverständnis — genau hier sind kleine
+   lokale Modelle schwach.
+
+**Konsequenz:** Die Wahl zwischen lokalen und API-Modellen darf **nicht** aus dem
+Bauch getroffen werden. Es braucht eine **messbare, wiederholbare Grundlage**. Das
+Eval-Set (8.10) reicht dafür nicht: es testet nur die Erstextraktion, in **einem**
+Lauf (Flakiness bleibt unsichtbar), nur mit `min_*`-Schwellen (Über-Extraktion wird
+sogar belohnt), ohne Revisions-Pfad und ohne Modellvergleich.
+
+**Ziel.** Ein **wachstumsfähiges, gut dokumentiertes** Benchmark-System, das mehrere
+Modelle (lokal *und* API) reproduzierbar auf **Extraktions- und Korrektur-Qualität**
+vergleicht — mit Fokus auf die vier real beobachteten Fehlerklassen: **Flakiness,
+Über-Extraktion, „nichts erkannt", nicht angewandte Korrektur**.
+
+**Architektur — vier Bausteine.**
+
+1. **Eval-Paket `src/kollege/eval/`** (Single Source of Truth, ohne LLM testbar):
+   - `fixtures.py` — Laden + **Schema-Validierung** der JSON-Fixtures (beide Familien),
+     Kategorien/Tags.
+   - `scoring.py` — **deklarativer** Scorer: aus dem `expected`-Block → `FixtureScore`
+     (hits/total + Flags `empty`, `over_extraction`, `forbidden_hit`). Neue Prüfung =
+     ein optionaler Key + ein Zweig.
+   - `runner.py` — **N-Wiederholungen** pro Fixture + Aggregation: `pass_rate`,
+     `mean_score`, `empty_rate`, `over_extraction_rate`, Latenz-Median.
+   - [`tests/test_eval.py`](tests/test_eval.py) importiert daraus (kein Logik-Duplikat,
+     bestehende Fixtures bleiben gültig).
+
+2. **Erweitertes Fixture-Schema** (abwärtskompatibel — alle neuen Keys optional):
+   - Extraktion (`tests/fixtures/eval/`): zusätzlich `max_contacts`, `max_tasks`,
+     `max_project_updates` (Über-Extraktion), `forbidden_keywords`, `must_not_be_empty`.
+   - **Revision (neu, `tests/fixtures/eval_revision/`):** `original_transcript`,
+     `current_result`, `correction`, `known_names`, `expected`. **Erster Fixture = der
+     heutige Aibling-Fall** (`forbidden_keywords: ["Eibling"]`, `max_tasks: 1`,
+     `must_not_be_empty: true`) — bindet die konkrete Fehlerklasse als Wächter ein.
+
+3. **Benchmark-Runner `scripts/benchmark_models.py`:**
+   - CLI: `--models qwen2.5:7b-instruct,ornith:9b`, `--runs 5`, `--suite extraction,revision`,
+     `--out benchmarks/results/`.
+   - Modell-/Provider-Override via `Settings(llm_provider=…, llm_model=…)` → deckt lokale
+     (Ollama) **und** API-Modelle (Anthropic/OpenAI) ab; `build_model()` kann das bereits.
+   - **OpenRouter als bequemes Benchmark-Backend** (OpenAI-kompatibel, ein Key, viele
+     Modelle inkl. Mistral/Qwen/DeepSeek/GLM). Hier **datenschutzrechtlich unkritisch**,
+     weil die Fixtures **synthetisch** sind (keine echten personenbezogenen Daten) —
+     passt zu CLAUDE.md („echte Daten erst nach Trockenlauf mit Fake-Daten"). Die
+     **konforme** Produktions-Anbindung ist bewusst getrennt (Schritt 8.12).
+   - Nutzt exakt den **Produktions-Pfad** (`run_extraction` / `run_revision`) → misst, was
+     live passiert (inkl. Primär-→Fallback-Verhalten).
+   - Ausgabe: **Vergleichs-Matrix** (Modell × Suite → pass_rate) + Per-Fixture-Aufschlüsselung
+     + Ø/Median-Latenz, gut lesbar im Terminal.
+   - **Historie:** kompakte Zusammenfassung nach `benchmarks/results/<datum>_<modell>.md`
+     (eingecheckt → Fortschritt/Regression über Modell-Versionen sichtbar); Rohläufe gitignored.
+
+4. **Dokumentation `docs/benchmark.md`:** was gemessen wird und **warum** (die vier
+   Fehlerklassen, verlinkt auf diese Analyse), **wie man Fixtures ergänzt** (der
+   Wachstumspfad, beide Familien), wie man ein Modell registriert, alle Befehle,
+   **Ergebnis-Interpretation** (niedrige `pass_rate` vs. `empty_rate` vs.
+   `over_extraction_rate` bedeuten Verschiedenes), Schwellenwerte + Begründung,
+   Ablage der Historie. Querverweis aus [`docs/live-testing-guide.md`](docs/live-testing-guide.md) §5.
+
+**Wachstums-Prinzipien (bewusst so entworfen — das ist die Kernanforderung).**
+- Fixtures sind **Daten, nicht Code** → neues Szenario = neue JSON-Datei, kein Code-Diff.
+- Scorer **deklarativ** → neue Prüfung = optionaler `expected`-Key + ein Zweig.
+- Modell-Liste als **CLI/Config** → neues Modell = eine Zeile, kein Code-Diff.
+- Ergebnisse **append-only** → echtes Regressions-/Fortschritts-Tracking.
+- Kategorien/Tags an Fixtures → Suites filterbar, ohne Umbau.
+
+**Vorgehen (test-driven, wo deterministisch — CLAUDE.md).**
+- Scorer + Aggregation **zuerst als Unit-Tests** (deterministische Inputs, kein LLM).
+- Fixture-Loader mit Schema-Validierung (fehlerhafte Fixtures früh fangen).
+- **CI bleibt LLM-frei:** FunctionModel-Smoke prüft auch die neuen Keys; Real-LLM /
+  Benchmark laufen nur manuell (`scripts/benchmark_models.py`, `pytest -m eval --real-llm`).
+
+**Bewusst nicht im Scope (Backlog, später).** Automatische CI-Gates gegen echte
+Modelle; Kosten-/Token-Tracking pro API-Modell; semantische Ähnlichkeit statt
+Keyword-Match; Whisper-Transkriptions-Benchmark (hier nur Text-Fixtures).
+
+**DoD.**
+- `uv run python scripts/benchmark_models.py --models ornith:9b,qwen2.5:7b-instruct --runs 5`
+  erzeugt eine Vergleichs-Matrix inkl. `pass_rate`, `empty_rate`, `over_extraction_rate`
+  und Latenz — für **Extraktion und Revision**.
+- Mind. ein Revisions-Fixture (Aibling-Fall) reproduziert die heutige Fehlerklasse messbar.
+- `src/kollege/eval/`-Scorer + Aggregation test-driven; `tests/test_eval.py` nutzt das Paket;
+  CI-Kette grün (`ruff` / `mypy` / `pytest`).
+- [`docs/benchmark.md`](docs/benchmark.md) erklärt Nutzung **und** Wachstumspfad; erste
+  Baseline (ornith vs. qwen) in `benchmarks/results/` eingecheckt.
+
+### Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden ⬜
+
+**Motiv.** Designprinzip 5 (lokal-first & Datensparsamkeit). Falls lokale Modelle
+qualitativ nicht reichen (siehe 8.11), soll **nicht** blind ein US-Key (OpenAI/
+Anthropic direkt) genutzt werden. Bevorzugt: Modelle auf **deutschen/europäischen
+Servern**, **DSGVO-konform mit AVV** (Auftragsverarbeitungsvertrag). Dieser Schritt
+klärt die Anbieter-Landschaft, wählt 1–2 Kandidaten und bindet sie an — **8.11
+liefert die Mess-Grundlage** für die Auswahl.
+
+**Leitstrategie — „erst entdecken, dann konform hosten" (vom Nutzer gewünscht).**
+Modell-*Auswahl* und rechtskonformes *Hosting* werden **getrennt**:
+1. **Entdeckung:** mit dem bestehenden **OpenRouter**-Account und **synthetischen**
+   Benchmark-Fixtures (8.11) ein breites Feld testen — inkl. Mistral, chinesischer
+   Open-Weight-Modelle (Qwen, DeepSeek, GLM) u. a. Ziel: herausfinden, *welches Modell
+   qualitativ überzeugt*. Datenschutzrechtlich hier unkritisch (keine echten Daten).
+2. **Konforme Anbindung:** das gewählte Modell **erst für die Produktion** DSGVO-konform
+   re-hosten (siehe Landschaft/Kernabwägung). So bleibt die Entscheidung datengetrieben,
+   ohne früh von Hosting-Fragen ausgebremst zu werden.
+
+**Landschaft (Recherche-Ergebnis 2026-07-01, im Schritt aktualisieren/verifizieren).**
+- **EU-Lab mit eigenen (auch proprietären) Modellen — bester Fit:**
+  - **Mistral** (FR, „La Plateforme"): proprietäres, tool-fähiges Modell (Mistral
+    Large) **und** Open-Weight; EU-Firma, AVV, EU-Server; **OpenAI-kompatible API** →
+    passt nahezu direkt in [`build_model()`](src/kollege/agent/__init__.py).
+  - **Aleph Alpha** (DE): Souveränitäts-Fokus, DE-Hosting; Tool-Calling-Reife prüfen.
+- **Frontier-Modelle mit EU-Region + AVV über Hyperscaler** (US-Prozessor, aber
+  EU-Datenresidenz): **Claude auf AWS Bedrock** (`eu-central-1` Frankfurt) / **GCP
+  Vertex** (`europe-west`); **GPT auf Azure OpenAI** (EU Data Boundary). Erstklassiges
+  Tool-Calling, löst die 8.11-Fehlerklasse voraussichtlich vollständig.
+- **EU-Souverän-Hoster für Open-Weight-Modelle:** IONOS AI Model Hub (DE), Scaleway
+  Generative APIs (FR), OVHcloud AI Endpoints (FR). Hier gilt: **nur Open-Source-Modelle**.
+- **Chinesische Open-Weight-Modelle (Qwen, DeepSeek, GLM):** stark und offen → als
+  **offene Gewichte auf EU-Hostern** (obige Souverän-Hoster oder self-host) DSGVO-fähig.
+  **Wichtig:** **niemals** über die chinesischen **Vendor-APIs** direkt (Daten nach China,
+  kein Angemessenheitsbeschluss → DSGVO-Verstoß). Für die reine *Entdeckung* via
+  OpenRouter (synthetische Daten) hingegen unproblematisch.
+- **Aggregatoren:** **OpenRouter** ist ein **US-Intermediär** — **ideal für die
+  Entdeckungsphase** (ein Key, viele Modelle, synthetische Daten), aber als DSGVO-
+  Catch-all für Produktion fraglich (Daten laufen über US-Firma; Provider-Filter/
+  No-Logging vorhanden, aber kein sauberer EU-AVV auf Router-Ebene). **Nicht** als
+  Produktions-Compliance-Fundament einplanen — dort das gewählte Modell konform re-hosten.
+
+**Kernabwägung (Antwort auf „dann nur Open-Source?").** Nein. Nur bei rein EU-nativen
+Souverän-Hostern (IONOS/Scaleway/OVH) ist man auf Open-Weight beschränkt. Mit EU-AVV +
+EU-Region bei einem Hyperscaler (Bedrock/Vertex/Azure) sind proprietäre Frontier-
+Modelle auf EU-Servern nutzbar. **Mistral** vereint beides (EU-Firma + eigenes
+proprietäres, tool-fähiges Modell, EU-gehostet).
+
+**Ansatz.**
+- [`build_model()`](src/kollege/agent/__init__.py) um Provider erweitern — Mistral ist
+  via OpenAI-kompatiblem Endpoint trivial; Bedrock via pydantic-ai `BedrockModel`.
+  Keys/Region über `.env` (Präfix `KOLLEGE_`), nie im Repo.
+- **8.11-Benchmark als Auswahl-Werkzeug:** Kandidaten gegeneinander messen (pass_rate/
+  empty_rate/Latenz) **plus eine Datenschutz-Spalte** in der Ergebnis-Doku: AVV (ja/nein),
+  Region, Open-Weight vs. proprietär.
+- Datensparsamkeit bleibt (Auszüge statt Volltext); EU-Region explizit pinnen; AVV je
+  gewähltem Anbieter abschließen/ablegen.
+
+**Bewusst nicht im Scope.** Anbindung *aller* genannten Anbieter; produktive
+AVV-Verträge (das ist ein organisatorischer, kein Code-Schritt — hier nur vorbereiten
+und dokumentieren). Siehe auch Querschnitt DSGVO und Schritt 17.
+
+**DoD.**
+- [`build_model()`](src/kollege/agent/__init__.py) unterstützt mind. **einen**
+  EU-/DSGVO-Anbieter live (Kandidat: Mistral); Config rein über `.env`.
+- Benchmark-Vergleich **lokal vs. EU-API** mit 8.11 durchgeführt und in
+  `benchmarks/results/` + kurzer Notiz (AVV/Region/Open-vs-proprietär) dokumentiert.
+- Empfehlung für das produktive Standard-Modell schriftlich festgehalten (PROJECT_LOG).
+
 ---
 
 ## Phase 2 — E-Mail & Übersicht *(zurückgestellt bis Phase 1.5 rund läuft)*
@@ -337,6 +513,8 @@ Gemeinde-Daten besonders behandeln, Secrets-Review. Siehe Checkliste unten.
 - [ ] Datensparsamkeit: Auszüge statt Volltext; Lösch-/Aufbewahrungsfristen.
 - [ ] Secrets nie im Klartext im Repo (E-Mail-Passwort, Signal-Link, API-Keys).
 - [ ] Bei Cloud-LLM: AVV + möglichst EU/DE-Verarbeitung; sonst Ollama lokal.
+      → Anbieter-Evaluierung in **Schritt 8.12** (Mistral/Aleph Alpha/Bedrock-EU;
+      OpenRouter als US-Intermediär bewusst **kein** DSGVO-Fundament).
 - [ ] KI-Transparenz: Assistent gibt sich als KI zu erkennen (sobald Dritte interagieren).
 - [ ] Gemeinde-Daten (öffentliche Stellen) besonders sensibel.
 - [ ] Transportverschlüsselung überall (IMAP SSL, HTTPS).
