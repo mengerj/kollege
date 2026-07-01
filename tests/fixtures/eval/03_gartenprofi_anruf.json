@@ -6,8 +6,10 @@
     "min_contacts": 1,
     "contact_names": ["Gartenprofi"],
     "min_tasks": 1,
+    "max_tasks": 2,
     "task_keywords": ["anrufen", "Liefertermin", "Gartenprofi"],
     "min_project_updates": 0,
-    "project_names": []
+    "project_names": [],
+    "must_not_be_empty": true
   }
 }
