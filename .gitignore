@@ -29,6 +29,9 @@ logs_out/
 *.log
 projects/
 
+# Benchmark-Rohläufe (Schritt 8.11) — nur die Markdown-Historie wird eingecheckt.
+benchmarks/results/*.json
+
 # OS / editor
 .DS_Store
 .idea/

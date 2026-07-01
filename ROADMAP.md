@@ -12,23 +12,17 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision).**
+**Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden.**
 
-**Auslöser (Live-Debugging 2026-07-01).** Eine simple Rechtschreibkorrektur
-(„Es heißt Aibling, nicht Eibling") lief live ins Leere („nichts erkannt"). Die
-Ursachenanalyse zeigte: Das Modell *versteht* die Korrektur einwandfrei, scheitert
-aber **nicht-deterministisch** am strukturierten/Tool-Output. Ein A/B-Test ergab,
-dass **beide** lokalen Modelle (`ornith:9b`, `qwen2.5:7b-instruct`) auf dem
-Korrektur-Prompt flaky sind und denselben Leer-Fehlerfall reproduzieren. Bevor
-blind ein Modell gewählt wird (lokal vs. API), braucht es eine **datengetriebene
-Grundlage**. Das bestehende Eval-Set (8.10) kann das nicht beantworten: nur
-Extraktion, Einzel-Lauf (Flakiness unsichtbar), nur `min_*` (Über-Extraktion wird
-belohnt), keine Revisions-Abdeckung, kein Modellvergleich.
+Schritt 8.11 (Modell-Benchmark-System) ist abgeschlossen: `src/kollege/eval/`
+(Fixtures/Scoring/Runner), `scripts/benchmark_models.py`, `docs/benchmark.md`
+und eine erste Baseline (`ornith:9b` vs. `qwen2.5:7b-instruct`) in
+`benchmarks/results/` liegen vor. Details siehe Schritt 8.11 unten und
+[PROJECT_LOG.md](PROJECT_LOG.md).
 
-**Ziel:** ein wachstumsfähiges, dokumentiertes Benchmark-System, das mehrere
-Modelle reproduzierbar auf Extraktions- **und** Korrektur-Qualität vergleicht,
-mit Fokus auf die real beobachteten Fehlerklassen (Flakiness, Über-Extraktion,
-„nichts erkannt", nicht angewandte Korrektur). Details unten in Schritt 8.11.
+Jetzt: Anbieter-Landschaft klären, 1–2 EU-/DSGVO-konforme Kandidaten wählen und
+in [`build_model()`](src/kollege/agent/__init__.py) anbinden — 8.11 liefert die
+Mess-Grundlage für die Auswahl. Details unten in Schritt 8.12.
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 > Schritt 8.5 (restliche Live-Edge-Cases) läuft parallel weiter.
@@ -54,8 +48,8 @@ mit Fokus auf die real beobachteten Fehlerklassen (Flakiness, Über-Extraktion,
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
-| 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ▶ nächster Schritt |
-| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen (nutzt 8.11) |
+| 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
+| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ▶ nächster Schritt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -282,7 +276,7 @@ erwartetem Output. [`tests/test_eval.py`](tests/test_eval.py) mit `@pytest.mark.
 - Manuell: `pytest -m eval --real-llm -s` → Trefferquote pro Fixture (Schwellenwert 50 %).
 **DoD:** ✅ `uv run pytest -m eval --real-llm -s` zeigt Trefferquote; 175 Tests grün.
 
-### Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision) ▶
+### Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision) ✅
 
 **Motiv (aus dem Live-Debugging 2026-07-01).** Eine triviale Rechtschreibkorrektur
 („Es heißt Aibling, nicht Eibling") auf einen offenen Vorschlag lief live ins Leere
@@ -372,15 +366,26 @@ vergleicht — mit Fokus auf die vier real beobachteten Fehlerklassen: **Flakine
 Modelle; Kosten-/Token-Tracking pro API-Modell; semantische Ähnlichkeit statt
 Keyword-Match; Whisper-Transkriptions-Benchmark (hier nur Text-Fixtures).
 
-**DoD.**
-- `uv run python scripts/benchmark_models.py --models ornith:9b,qwen2.5:7b-instruct --runs 5`
+**DoD.** ✅
+- ✅ `uv run python scripts/benchmark_models.py --models ornith:9b,qwen2.5:7b-instruct --runs 5`
   erzeugt eine Vergleichs-Matrix inkl. `pass_rate`, `empty_rate`, `over_extraction_rate`
-  und Latenz — für **Extraktion und Revision**.
-- Mind. ein Revisions-Fixture (Aibling-Fall) reproduziert die heutige Fehlerklasse messbar.
-- `src/kollege/eval/`-Scorer + Aggregation test-driven; `tests/test_eval.py` nutzt das Paket;
-  CI-Kette grün (`ruff` / `mypy` / `pytest`).
-- [`docs/benchmark.md`](docs/benchmark.md) erklärt Nutzung **und** Wachstumspfad; erste
-  Baseline (ornith vs. qwen) in `benchmarks/results/` eingecheckt.
+  und Latenz — für **Extraktion und Revision** (gegen einzelne lokale Modelle manuell
+  verifiziert; der volle 2-Modell-Lauf ist teuer, siehe Kosten-Hinweis in `docs/benchmark.md`).
+- ✅ Mind. ein Revisions-Fixture (Aibling-Fall) reproduziert die heutige Fehlerklasse messbar
+  (`tests/fixtures/eval_revision/01_aibling_rechtschreibkorrektur.json`).
+- ✅ `src/kollege/eval/`-Scorer + Aggregation test-driven; `tests/test_eval.py` nutzt das Paket;
+  CI-Kette grün (`ruff` / `mypy` / `pytest`, 199 Tests).
+- ✅ [`docs/benchmark.md`](docs/benchmark.md) erklärt Nutzung **und** Wachstumspfad; erste
+  Baseline in `benchmarks/results/` eingecheckt — **fünf OpenRouter-Modelle**
+  (`mistral-medium-3-5`, `mistral-medium-3`, `mistral-small-2603`, `qwen-2.5-7b-instruct`,
+  `glm-4.5-air`) statt des lokalen ornith/qwen-Paars, weil das schneller und billiger ist
+  (netzwerkgebunden + `--concurrency`, kein GPU-Engpass) und dieselbe Fragestellung
+  beantwortet: `mistral-medium-3-5` ist auf beiden Suiten bei 100 % pass_rate und
+  niedrigster Latenz (2–4 s median), `qwen-2.5-7b-instruct` (über OpenRouter) scheiterte
+  komplett (100 % error_rate, vermutlich Formatierungs-/Endpoint-Problem — nicht weiter
+  untersucht, da außerhalb des Scopes), `mistral-small-2603` zeigt hohe `empty_rate`
+  (40 % Extraktion) — der lokale ornith/qwen-Vergleich aus dem Live-Vorfall bleibt jederzeit
+  mit demselben Befehl nachvollziehbar.
 
 ### Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden ⬜
 

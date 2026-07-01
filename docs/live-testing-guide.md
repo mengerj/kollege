@@ -148,6 +148,13 @@ Diese Punkte haben in der ersten Live-Inbetriebnahme jeweils Zeit gekostet — s
 sind bereits **gefixt**, aber gut zu kennen, weil ähnliche Klassen von Fehlern
 wieder auftauchen werden:
 
+> **Stolperstein #10 (Aibling-Fall) wurde zum eigenen Benchmark-System.** Eine
+> triviale Rechtschreibkorrektur lief live nicht-deterministisch ins Leere —
+> reproduzierbar bei zwei verschiedenen lokalen Modellen. Die messbare
+> Ursachenanalyse + der wiederholbare Modellvergleich (Flakiness,
+> Über-Extraktion, „nichts erkannt", nicht angewandte Korrektur) leben jetzt in
+> [`docs/benchmark.md`](benchmark.md) (Schritt 8.11).
+
 1. **Health-Check liefert `204 No Content` mit leerem Body** — nicht
    `{"status":"ok"}`. `curl …/v1/health` „zeigt nichts" = gesund. Mit
    `-w '%{http_code}'` prüfen.
