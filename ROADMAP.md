@@ -336,6 +336,11 @@ vergleicht — mit Fokus auf die vier real beobachteten Fehlerklassen: **Flakine
      `--out benchmarks/results/`.
    - Modell-/Provider-Override via `Settings(llm_provider=…, llm_model=…)` → deckt lokale
      (Ollama) **und** API-Modelle (Anthropic/OpenAI) ab; `build_model()` kann das bereits.
+   - **OpenRouter als bequemes Benchmark-Backend** (OpenAI-kompatibel, ein Key, viele
+     Modelle inkl. Mistral/Qwen/DeepSeek/GLM). Hier **datenschutzrechtlich unkritisch**,
+     weil die Fixtures **synthetisch** sind (keine echten personenbezogenen Daten) —
+     passt zu CLAUDE.md („echte Daten erst nach Trockenlauf mit Fake-Daten"). Die
+     **konforme** Produktions-Anbindung ist bewusst getrennt (Schritt 8.12).
    - Nutzt exakt den **Produktions-Pfad** (`run_extraction` / `run_revision`) → misst, was
      live passiert (inkl. Primär-→Fallback-Verhalten).
    - Ausgabe: **Vergleichs-Matrix** (Modell × Suite → pass_rate) + Per-Fixture-Aufschlüsselung
@@ -386,6 +391,16 @@ Servern**, **DSGVO-konform mit AVV** (Auftragsverarbeitungsvertrag). Dieser Schr
 klärt die Anbieter-Landschaft, wählt 1–2 Kandidaten und bindet sie an — **8.11
 liefert die Mess-Grundlage** für die Auswahl.
 
+**Leitstrategie — „erst entdecken, dann konform hosten" (vom Nutzer gewünscht).**
+Modell-*Auswahl* und rechtskonformes *Hosting* werden **getrennt**:
+1. **Entdeckung:** mit dem bestehenden **OpenRouter**-Account und **synthetischen**
+   Benchmark-Fixtures (8.11) ein breites Feld testen — inkl. Mistral, chinesischer
+   Open-Weight-Modelle (Qwen, DeepSeek, GLM) u. a. Ziel: herausfinden, *welches Modell
+   qualitativ überzeugt*. Datenschutzrechtlich hier unkritisch (keine echten Daten).
+2. **Konforme Anbindung:** das gewählte Modell **erst für die Produktion** DSGVO-konform
+   re-hosten (siehe Landschaft/Kernabwägung). So bleibt die Entscheidung datengetrieben,
+   ohne früh von Hosting-Fragen ausgebremst zu werden.
+
 **Landschaft (Recherche-Ergebnis 2026-07-01, im Schritt aktualisieren/verifizieren).**
 - **EU-Lab mit eigenen (auch proprietären) Modellen — bester Fit:**
   - **Mistral** (FR, „La Plateforme"): proprietäres, tool-fähiges Modell (Mistral
@@ -398,10 +413,16 @@ liefert die Mess-Grundlage** für die Auswahl.
   Tool-Calling, löst die 8.11-Fehlerklasse voraussichtlich vollständig.
 - **EU-Souverän-Hoster für Open-Weight-Modelle:** IONOS AI Model Hub (DE), Scaleway
   Generative APIs (FR), OVHcloud AI Endpoints (FR). Hier gilt: **nur Open-Source-Modelle**.
-- **Aggregatoren:** **OpenRouter** ist ein **US-Intermediär** — praktisch für
-  Experimente, aber als DSGVO-Catch-all fraglich (Daten laufen über US-Firma; Provider-
-  Filter/No-Logging vorhanden, aber kein sauberer EU-AVV auf Router-Ebene). **Nicht**
-  als Compliance-Fundament einplanen.
+- **Chinesische Open-Weight-Modelle (Qwen, DeepSeek, GLM):** stark und offen → als
+  **offene Gewichte auf EU-Hostern** (obige Souverän-Hoster oder self-host) DSGVO-fähig.
+  **Wichtig:** **niemals** über die chinesischen **Vendor-APIs** direkt (Daten nach China,
+  kein Angemessenheitsbeschluss → DSGVO-Verstoß). Für die reine *Entdeckung* via
+  OpenRouter (synthetische Daten) hingegen unproblematisch.
+- **Aggregatoren:** **OpenRouter** ist ein **US-Intermediär** — **ideal für die
+  Entdeckungsphase** (ein Key, viele Modelle, synthetische Daten), aber als DSGVO-
+  Catch-all für Produktion fraglich (Daten laufen über US-Firma; Provider-Filter/
+  No-Logging vorhanden, aber kein sauberer EU-AVV auf Router-Ebene). **Nicht** als
+  Produktions-Compliance-Fundament einplanen — dort das gewählte Modell konform re-hosten.
 
 **Kernabwägung (Antwort auf „dann nur Open-Source?").** Nein. Nur bei rein EU-nativen
 Souverän-Hostern (IONOS/Scaleway/OVH) ist man auf Open-Weight beschränkt. Mit EU-AVV +
