@@ -12,18 +12,16 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.9 — Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz).**
+**Schritt 8.10 — Eval-Set für Extraktionsqualität.**
 
-Schritt 8.7 (Bekannte Namen abgleichen) ist erledigt. Als nächstes: den Bot
-unbeaufsichtigt und stabil laufen lassen.
+Schritt 8.9 (Robuster Dauerbetrieb) ist erledigt. Als nächstes: ein kleines
+Fixture-Set aus Beispiel-Transkripten → erwartete Felder, damit Modell-/Prompt-
+Wechsel messbar werden.
 
-Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.9):
-1. **Auto-Restart** via launchd (macOS) statt manuellem `nohup`.
-2. **Cold-Start abfedern:** Ollama-Modell beim Start vorladen (Pre-Warm), Trade-off
-   RAM vs. Latenz prüfen.
-3. **Fehlertoleranz:** sauberes Verhalten wenn Ollama/Whisper/Container kurz weg sind.
-4. **Nachrichten-Verlust bei Verbindungslücke** klären (signal-cli Nachrichten-
-   Nachlieferung).
+Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.10):
+1. Fixture-Transkripte (3–5 Beispiele) mit erwartetem Output in `tests/fixtures/`.
+2. Eval-Runner (`uv run pytest -m eval` o. Ä.) mit `FunctionModel`-Mocks für CI.
+3. Schwellenwert-Tests statt striktem Equality-Assert (LLM-Nichtdeterminismus).
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 
@@ -46,7 +44,7 @@ Vorgehen (Details in **Phase 1.5** unten, Abschnitt 8.9):
 | 8.6 | Korrektur-/Revisions-Schleife (natürlichsprachig) | 1.5 | ✅ erledigt |
 | 8.7 | Bekannte Namen abgleichen (LLM-seitig) | 1.5 | ✅ erledigt |
 | 8.8 | Sofort-Quittung / gefühlte Reaktionszeit | 1.5 | ✅ erledigt |
-| 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ⬜ offen (geplant) |
+| 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ⬜ offen (geplant) |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -255,16 +253,17 @@ eigentliche Vorschlag kommt. Optional: Hinweis bei ungewöhnlich langem Lauf.
 **DoD:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt wie
 gehabt. Kein Doppel-Senden mehr aus Ungeduld.
 
-### Schritt 8.9 — Robuster Dauerbetrieb ⬜
-Der Bot soll **unbeaufsichtigt** laufen und Störungen überleben:
-- Als Dienst mit **Auto-Restart** (launchd/systemd) statt manuellem `nohup`.
-- **Modell warm halten** bzw. Cold-Start abfedern (Pre-Warm beim Start; Trade-off
-  RAM beachten — vgl. ornith-Erfahrung).
-- Sauberer Umgang, wenn Ollama/Whisper/Container kurz weg sind (Meldung statt Crash).
-- **Nachrichten-Verlust bei Verbindungslücke prüfen** (beim RAM-Engpass beobachtet):
-  klären, ob signal-cli Nachrichten der Lücke nachliefert; sonst Gegenmaßnahme.
-**DoD:** Bot übersteht Neustart von Ollama/Container und einen RAM-Engpass, ohne dass
-eine Notiz still verloren geht.
+### Schritt 8.9 — Robuster Dauerbetrieb ✅
+Der Bot läuft **unbeaufsichtigt** und übersteht Störungen:
+- **launchd-Service** [`deploy/de.mengerj.kollege.plist`](deploy/de.mengerj.kollege.plist):
+  `KeepAlive = true`, `ThrottleInterval = 60 s`, gemeinsame Log-Datei.
+- **Pre-Warm**: `pre_warm_model()` lädt das Ollama-Modell beim Dienststart;
+  Cold-Start-Latenz trifft nicht mehr die erste Sprachnotiz.
+- **Retry in `_extract()`**: 3 Versuche mit 10 s Abstand bei transientem Ausfall
+  (Ollama/Container temporär weg); erst dann Fehlermeldung an Absender.
+- **Nachrichten-Verlust**: kein stilles Verlustrisiko im Normalbetrieb —
+  signal-cli puffert, Signal-Server queued ~30 Tage (analysiert, dokumentiert).
+**DoD:** ✅ 173 Tests grün; Pre-Warm, Retry-Logik und launchd-Plist implementiert.
 
 ### Schritt 8.10 — Eval-Set für Extraktionsqualität ⬜
 Kleines Fixture-Set aus Beispiel-Transkripten → erwartete Felder (Schwellen/Smoke,

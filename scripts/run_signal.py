@@ -26,6 +26,7 @@ from pathlib import Path
 # Sicherstellen, dass src/ im Python-Pfad liegt (bei direktem Aufruf).
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from kollege.agent import pre_warm_model
 from kollege.channels.signal_channel import SignalChannel
 from kollege.config import load_settings
 from kollege.db import open_repository
@@ -129,6 +130,19 @@ def main() -> None:
         settings=settings,
         log_dir=log_dir,
     )
+
+    # Ollama-Modell vorladen, damit die erste Sprachnotiz keine Cold-Start-Latenz
+    # (mehrere Minuten bei RAM-Druck) erlebt. Schlägt fehl → Warnung, kein Absturz.
+    pre_warm_model(settings)
+
+    # Hinweis zur Nachrichten-Zuverlässigkeit (Schritt 8.9):
+    # signal-cli puffert Nachrichten im Arbeitsspeicher, solange unsere WebSocket-
+    # Verbindung unterbrochen ist. Bei Wiederherstellen der Verbindung werden sie
+    # nachgeliefert. Startet signal-cli (Docker) neu, holt es fehlende Nachrichten
+    # vom Signal-Server nach (Signal hält Nachrichten für verknüpfte Geräte ~30 Tage).
+    # Einziges stilles Verlust-Risiko: Container UND Bot beide offline ohne je
+    # reconnected zu haben — unrealistisch im täglichen Betrieb.
+    # → Kein eigenes Ack-Protokoll nötig; launchd-Auto-Restart sichert den Bot ab.
 
     print("\n✓ Bereit. Lausche auf Signal-Nachrichten … (Strg-C zum Beenden)\n")
     try:

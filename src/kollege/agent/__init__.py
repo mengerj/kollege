@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import logging
 import sqlite3
 
 from pydantic_ai import Agent, RunContext
@@ -43,9 +44,12 @@ __all__ = [
     "build_model",
     "filter_known_names",
     "get_known_names_context",
+    "pre_warm_model",
     "run_extraction",
     "run_revision",
 ]
+
+_logger = logging.getLogger("kollege.agent")
 
 _MAX_KNOWN_NAMES = 80
 
@@ -274,6 +278,47 @@ def query_open_items(ctx: RunContext[Repository]) -> str:
         return "Keine offenen Aufgaben."
     lines = [f"- [{t.id}] {t.title}" for t in tasks]
     return "\n".join(lines)
+
+
+def pre_warm_model(settings: Settings) -> None:
+    """Ollama-Modell vorladen, bevor die erste Nachricht eintrifft.
+
+    Cold-Start (Modell aus VRAM/RAM verdrängt) dauert je nach Modell und
+    RAM-Auslastung mehrere Minuten. Beim Start des Dienstes verhindert Pre-Warm,
+    dass die allererste Sprachnotiz diese Latenz erlebt.
+
+    Scheitert das Vorladen (Ollama noch nicht bereit), wird nur gewarnt — der
+    Dienst startet trotzdem und lädt das Modell beim ersten echten Aufruf.
+
+    Nur für Ollama sinnvoll; Cloud-Provider brauchen kein Pre-Warm.
+    """
+    if settings.llm_provider != LLMProvider.OLLAMA:
+        return
+
+    _logger.info("Pre-Warm: Lade Modell %s …", settings.llm_model)
+    try:
+        import httpx
+
+        # Ollama native API: POST /api/generate mit leerem Prompt lädt das Modell
+        # ohne eine vollständige Inferenz durchzuführen.
+        # ollama_base_url endet auf /v1 (OpenAI-kompatibel); für die native API
+        # brauchen wir nur den Basis-Anteil.
+        base = settings.ollama_base_url.rstrip("/").removesuffix("/v1")
+        resp = httpx.post(
+            f"{base}/api/generate",
+            json={"model": settings.llm_model, "prompt": "", "stream": False},
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        _logger.info("Pre-Warm: Modell %s geladen und bereit.", settings.llm_model)
+    except ImportError:
+        _logger.warning(
+            "Pre-Warm: httpx nicht installiert (uv sync --group signal) — übersprungen."
+        )
+    except Exception as exc:
+        _logger.warning(
+            "Pre-Warm: Fehlgeschlagen (%s) — Modell wird beim ersten Aufruf geladen.", exc
+        )
 
 
 def build_model(settings: Settings) -> Model:

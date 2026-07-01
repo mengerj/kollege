@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd User Agent — Kollege Signal-Bot (macOS)
+
+  Installation (einmalig):
+    cp deploy/de.mengerj.kollege.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/de.mengerj.kollege.plist
+
+  Starten / Stoppen:
+    launchctl start  de.mengerj.kollege
+    launchctl stop   de.mengerj.kollege
+
+  Status / Logs:
+    launchctl list | grep kollege
+    tail -f /Users/mengerj/repos/kollege/kollege.log
+
+  Deinstallieren:
+    launchctl unload ~/Library/LaunchAgents/de.mengerj.kollege.plist
+    rm ~/Library/LaunchAgents/de.mengerj.kollege.plist
+
+  Voraussetzungen:
+    - signal-cli-rest-api läuft: docker compose up -d
+    - Ollama läuft: ollama serve (oder Ollama.app)
+    - .env ist befüllt (KOLLEGE_SIGNAL_NUMBER, KOLLEGE_SIGNAL_API_URL)
+    - uv ist unter /Users/mengerj/.local/bin/uv installiert
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>de.mengerj.kollege</string>
+
+    <!-- Startet den Bot mit uv im Projekt-Verzeichnis. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mengerj/.local/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>scripts/run_signal.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/mengerj/repos/kollege</string>
+
+    <!-- Auto-Restart bei Absturz oder sauberem Beenden. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!--
+      Mindestabstand zwischen Neustarts (Sekunden).
+      Verhindert Restart-Schleifen wenn z. B. Ollama nicht läuft.
+      60 s ist ein guter Kompromiss: nach einem kurzen Ollama-Neustart
+      (~30 s) startet der Bot automatisch neu.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+    <!-- stdout + stderr in dieselbe Log-Datei (append-only via launchd). -->
+    <key>StandardOutPath</key>
+    <string>/Users/mengerj/repos/kollege/kollege.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mengerj/repos/kollege/kollege.log</string>
+
+    <!--
+      PATH muss uv, docker und Homebrew-Tools enthalten.
+      Anpassen, falls uv oder Homebrew an einem anderen Ort installiert sind.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/Users/mengerj/.local/bin</string>
+        <key>HOME</key>
+        <string>/Users/mengerj</string>
+    </dict>
+
+    <!-- Nur starten, wenn ein Benutzer eingeloggt ist (nicht beim Booten ohne Login). -->
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
