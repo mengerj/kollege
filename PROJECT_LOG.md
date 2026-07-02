@@ -5,6 +5,39 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-01 — Schritt 8.13 — Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung
+
+**Auslöser:** Live-Test. Der Bot stellte eine Rückfrage (*„Soll der Kontakt
+›Kräutergarten Aibling‹ als neuer Dienstleister angelegt werden? Aktuell ist nur
+›Kindergarten Bad Aibling‹ bekannt."*). Ein 👍 darauf wurde ignoriert, ein „ja"
+als neue (leere) Notiz behandelt.
+
+**Diagnose:** Eine `clarification` war eine **Sackgasse** — der Orchestrator sendete
+die Frage und kehrte zurück, **ohne** Pending-Zustand. Folge: `pending=False`, also
+konnte weder Tapback noch Text als Antwort andocken. Sekundär: die 👍-Erkennung
+verglich exakt gegen `👍` und wäre an Hautton-/Variation-Selector-Varianten zerbrochen.
+
+**Getan:**
+- Neuer Zustand `PendingClarification` (Ursprungstranskript + gestellte Frage);
+  Invariante „genau ein offener Zustand pro Absender" (Vorschlag *oder* Rückfrage).
+- Nächste Nachricht (Freitext / Sprache / 👍) → `run_clarification_response()`
+  re-extrahiert mit Ursprungstranskript + Frage + Antwort (analog Revisions-Schleife 8.6).
+  Konkretes Ergebnis → normaler Bestätigungs-Loop; weiter unklar → erneute Rückfrage;
+  „nein"/👎 → verwerfen ohne LLM-Lauf.
+- 👍/👎-Erkennung gehärtet: Basis-Codepoint-Vergleich (Modifier/Selektoren entfernt),
+  `👍`/`👌`/`✅` = ja, `👎`/`❌`/`🚫` = nein — gilt auch für Vorschläge.
+- Nebenbei: README um „Bot starten (Live-Betrieb)" + Schnelldiagnose ergänzt
+  (`docker compose up` startet nur die Signal-Bridge, nicht den Bot-Prozess selbst).
+
+**Tests:** +13 Orchestrator-Tests (Emoji-Varianten, 👎-Reject, komplette
+Rückfrage-Antwort-Schleife inkl. erneuter Rückfrage) + 1 Agent-Test (Prompt-Komposition).
+Gesamt grün: 213 passed. Ruff + mypy sauber.
+
+**Offen / bewusst ausgelassen:** TTL für offene Rückfragen; Zusammenführen mehrerer
+offener Zustände. Nächster regulärer Schritt bleibt **8.12** (EU-LLM-Anbieter).
+
+---
+
 ## 2026-07-01 — Schritt 8.11 — Modell-Benchmark-System (Extraktion + Revision)
 
 **Auslöser:** Live-Debugging desselben Tages — eine triviale Rechtschreibkorrektur

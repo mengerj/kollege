@@ -26,6 +26,9 @@ Mess-Grundlage für die Auswahl. Details unten in Schritt 8.12.
 
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 > Schritt 8.5 (restliche Live-Edge-Cases) läuft parallel weiter.
+>
+> Zwischendrin erledigt: **Schritt 8.13** (Rückfrage-Antwort-Schleife + robuste
+> 👍/👎-Erkennung) — aus einem Live-Test eingeschoben, siehe unten.
 
 ---
 
@@ -50,6 +53,7 @@ Mess-Grundlage für die Auswahl. Details unten in Schritt 8.12.
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
 | 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
 | 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ▶ nächster Schritt |
+| 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -455,6 +459,37 @@ und dokumentieren). Siehe auch Querschnitt DSGVO und Schritt 17.
 - Benchmark-Vergleich **lokal vs. EU-API** mit 8.11 durchgeführt und in
   `benchmarks/results/` + kurzer Notiz (AVV/Region/Open-vs-proprietär) dokumentiert.
 - Empfehlung für das produktive Standard-Modell schriftlich festgehalten (PROJECT_LOG).
+
+---
+
+### Schritt 8.13 — Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung ✅
+
+**Motivation (aus Live-Test).** Eine Rückfrage (`clarification`) war bisher eine
+Sackgasse: Der Bot fragte nach (z. B. *„Soll der Kontakt ›Kräutergarten Aibling‹
+als neuer Dienstleister angelegt werden?"*), speicherte aber **keinen** Pending-
+Zustand. Ein 👍 oder „ja" darauf lief ins Leere (`pending=False` → „Reaktion
+ignoriert" bzw. neue Extraktion „nichts erkannt"). Die „bei Unklarheit nachfragen"-
+Verzweigung (Designprinzip 3) konnte die Antwort also nie entgegennehmen.
+
+**Umgesetzt.**
+- Neuer Zustand `PendingClarification` (Ursprungstranskript + gestellte Frage).
+  Pro Absender ist **genau ein** offener Zustand erlaubt: Vorschlag *oder* Rückfrage.
+- Die nächste Nachricht (Freitext, Sprache **oder** 👍-Tapback) gilt als Antwort und
+  wird über `run_clarification_response()` mit dem Ursprungstranskript neu extrahiert
+  (analog zur Revisions-Schleife 8.6). Ergebnis → normaler Vorschlag/Bestätigungs-Loop;
+  bleibt es unklar → erneute Rückfrage; „nein"/👎 → verwerfen (ohne LLM-Lauf).
+- 👍-Erkennung gehärtet: Basis-Codepoint-Vergleich statt exaktem String, damit
+  `👍`, `👍️` (Variation-Selector) und `👍🏼` (Hautton) gleich gelten; zusätzlich
+  `👌`/`✅` als Zustimmung und `👎`/`❌`/`🚫` als Ablehnung (auch für Vorschläge).
+
+**Dateien.** [`orchestrator.py`](src/kollege/orchestrator.py) (`PendingClarification`,
+`_handle_reaction`, `_answer_clarification`, `_discard_clarification`, Emoji-Helfer),
+[`agent/__init__.py`](src/kollege/agent/__init__.py) (`run_clarification_response`),
+Tests in [`test_orchestrator.py`](tests/test_orchestrator.py) und
+[`test_agent.py`](tests/test_agent.py).
+
+**Bewusst nicht im Scope.** Zeitliches Ablaufen offener Rückfragen (TTL) und das
+Zusammenführen mehrerer offener Zustände pro Absender.
 
 ---
 
