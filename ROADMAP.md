@@ -12,19 +12,23 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.5 — restliche Live-Edge-Cases (interaktiv), Zwei-Durchgang validieren.**
+**Schritt 8.5 — restliche Live-Edge-Cases (interaktiv), 8.18 + 8.19 validieren.**
 
-**Schritt 8.18 ist erledigt** (diese Session, interaktiv mit der Nutzerin): Die
-Extraktion ist jetzt **zweistufig** — nach dem ersten One-Shot prüft ein zweiter
-Durchgang (`run_gap_check`) das Ergebnis gegen das Transkript, füllt Lücken
-(fehlende Frist/Projektzuordnung) und trägt Übersehenes nach; Rückfrage nur bei
-echter Unklarheit, da der Bestätigungs-Loop begründetes Raten absichert. Dazu
-Datumsanzeige auf Deutsch (`format_date_de`, „Do. 2. Juli 2026"); intern bleibt ISO.
+**Schritt 8.18 erledigt:** Extraktion **zweistufig** — zweiter Durchgang
+(`run_gap_check`) füllt Lücken (Frist/Projektzuordnung) und trägt Übersehenes nach;
+Datumsanzeige deutsch (`format_date_de`, „Do. 2. Juli 2026"), intern ISO.
 
-**Konkret als Nächstes:** im nächsten **interaktiven** Live-Test beobachten, ob der
-zweite Durchgang die zuvor nötigen Korrekturen (Datum ergänzen, Projektbezug,
-übersehene Aufgabe) tatsächlich vermeidet — und die Rate an unnötigen Rückfragen
-prüfen (nicht zu geschwätzig werden). Auffälligkeiten ins Eval-Set (8.10) übernehmen.
+**Schritt 8.19 erledigt** (aus Live-Test): **bestehende Aufgaben bearbeiten** — neue
+Notiz/Rückfrage-Antwort kann Titel/Frist/Projekt einer offenen Aufgabe ändern
+(`ExtractedTaskEdit`, `repo.update_task`, „✏️ Aufgabe ändern"-Vorschlag, Log-
+Konsistenz). Nebenbei behoben: `run_revision`/`run_clarification_response` reichen
+jetzt den Offene-Aufgaben-Kontext mit (sonst fehlten nach der Rückfrage die IDs).
+
+**Konkret als Nächstes:** interaktiver Live-Test — prüfen, ob (a) der zweite
+Durchgang die zuvor nötigen Korrekturen vermeidet und nicht zu geschwätzig wird, und
+(b) der Edit-Pfad im Alltag greift (auch der zuvor gescheiterte #6-Fall). Auffällig-
+keiten ins Eval-Set (8.10). Danach Stufe B für **Kontakte** (Umbenennung + Merge)
+oder **8.12** (EU-LLM-Anbieter, rein automatisierbar).
 
 **Automatisierbare Alternative (falls keine Nutzerin verfügbar):** **Schritt 8.12**
 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden (reine Code-/Config-Arbeit,
@@ -71,6 +75,7 @@ stabil, 8.18 hat die Extraktionsqualität darauf aufgesetzt verbessert.
 | 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ✅ erledigt |
 | 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ✅ erledigt |
 | 8.18 | Zwei-Durchgang-Extraktion + deutsche Datumsanzeige | 1.5 | ✅ erledigt |
+| 8.19 | Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben) | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -223,12 +228,14 @@ nötig. Eine *frische* Nachricht (ohne Zitat) bleibt wie heute eine **neue Notiz
 - **Korrektur per Sprachnachricht:** Zitat-Antwort kann auch Audio sein → erst
   transkribieren, dann als Korrekturtext verwenden (gleicher Pfad).
 
-**Stufe B — Korrektur bereits gespeicherter Einträge (später):** analog, aber die
-Zitat-Antwort zielt auf eine zuvor gesendete Bestätigung/ein Item. Erfordert eine
-Referenz auf persistierte Items (`LastPersistedBatch`), neue Repo-Methoden
-(`rename_contact`/`update_contact`, gezieltes `update_task`) **inkl. Markdown-Log-
-Konsistenz** und Merge-Semantik bei Kontakt-Umbenennung (`upsert_contact` dedupt per
-Name → „Schnitt"→„Schmidt" könnte zwei Einträge zusammenführen). Scope bewusst hinter A.
+**Stufe B — Korrektur bereits gespeicherter Einträge:** analog, aber die Zitat-
+Antwort/Notiz zielt auf einen persistierten Eintrag. **Aufgaben-Teil in
+[Schritt 8.19](#schritt-819--bestehende-aufgaben-bearbeiten-stufe-b-nur-aufgaben-)
+umgesetzt** (`update_task`, `edits`-Feld, Log-Konsistenz; adressiert über den
+Offene-Aufgaben-Kontext statt über eine persistierte `LastPersistedBatch`-Referenz).
+**Noch offen:** Kontakt-Umbenennung (`rename_contact`/`update_contact`) mit Merge-
+Semantik (`upsert_contact` dedupt per Name → „Schnitt"→„Schmidt" könnte zwei Einträge
+zusammenführen).
 
 **DoD (Stufe A):** ✅ Eine Zitat-Antwort auf den Vorschlag revidiert den Vorschlag
 sichtbar; Bestätigung speichert die korrigierte Fassung; frische Nachricht bleibt
@@ -691,6 +698,50 @@ reichert an und trägt Übersehenes nach, Rückfrage im ersten Durchgang übersp
 den zweiten, Fehler im zweiten Durchgang fällt aufs Erstergebnis zurück;
 `format_date_de`-Beispiele inkl. Umlaut-Monat + Anzeige in Vorschlag/`/offen`.
 275 Tests grün, `ruff`/`mypy --strict` sauber.
+
+### Schritt 8.19 — Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben) ✅
+
+**Auslöser (Live-Test).** Die Nutzerin sah per `/offen`, dass Aufgabe #6 „Bad
+Eibling" statt „Bad Aibling" hieß, und wollte den Eintrag per Notiz korrigieren.
+Die Rückfrage war vielversprechend (das LLM bot die Korrektur an), nach dem 👍 kam
+aber „Ich konnte nichts Konkretes erkennen". **Ursache:** die Extraktion hatte
+weder ein Schema-Feld noch eine Repo-Methode, um eine *bestehende* Aufgabe zu
+ändern (`ExtractionResult` kannte nur neue Kontakte/Aufgaben/Updates/Erledigungen;
+Repository nur `create_task`/`update_task_status`). Das ist die in [8.6](#schritt-86)
+bewusst zurückgestellte **Stufe B** — hier für **Aufgaben** umgesetzt (Kontakt-
+Umbenennung mit Merge-Semantik bleibt zurückgestellt).
+
+**Umsetzung (spiegelt 8.17 „Erledigungen").**
+- [`models.py`](src/kollege/models.py): neues `ExtractedTaskEdit` (`task_id`,
+  `task_title` unverändert aus der Liste offener Aufgaben; optionale
+  `new_title`/`new_due`/`new_project` — nur gesetzte Felder ändern). `edits`-Feld in
+  `ExtractionResult`, in `is_empty()` berücksichtigt.
+- [`repository.py`](src/kollege/db/repository.py): neue `update_task(task_id, …)`
+  (nur nicht-`None`-Felder schreiben; `ValueError` bei fehlender Aufgabe) +
+  öffentliche `get_project_by_id` (für Log-Konsistenz).
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): System-Prompt +
+  `build_open_tasks_context`-Hinweis erklären Änderungen (edits-Feld, task_id aus
+  der Liste, bei Mehrdeutigkeit `clarification`). **Wichtig für den Live-Pfad:**
+  `run_revision`/`run_clarification_response` reichen jetzt `open_tasks_context`
+  mit — sonst kennt der Lauf *nach* der Rückfrage die Aufgaben-IDs nicht mehr (genau
+  der Bug oben). Interne Formatter (Revision/Gap-Check) listen edits mit.
+- [`orchestrator.py`](src/kollege/orchestrator.py): neuer Vorschlagstyp
+  „✏️ Aufgabe ändern: #N Titel — Titel → «…», Frist → …" (`_result_items`,
+  `_edit_changes`); `dedupe_result` dedupt edits per `task_id`; `persist_result`
+  ruft `update_task` und vermerkt die Korrektur **append-only** im Projekt-Log
+  (Prinzip 4); nicht mehr vorhandene Aufgabe wird übersprungen.
+
+**Bewusste Grenzen.** Kontakt-Umbenennung (Merge/Dedup) weiter offen. Adressierung
+nur über die Liste offener Aufgaben (der Offene-Aufgaben-Kontext) — keine
+persistierte „Last-Batch"-Referenz. Fallback-Pfad (schwache Modelle) unterstützt
+edits wie schon `completed` nicht (Temp-Repo kennt die realen Aufgaben nicht).
+
+**DoD.** ✅ `FunctionModel`-Test: Korrektur-Notiz + passende offene Aufgabe → `edits`
+mit übernommener `task_id`; Repo-`update_task`-Tests (Titel/Frist/Projekt, `None`=
+unverändert, unbekannte ID → `ValueError`, Status bleibt offen); `persist_result`
+ändert Titel + schreibt Log-Korrektur; Orchestrator: Edit-Notiz → „ändern"-Vorschlag
+→ Bestätigung ändert die DB; Rückfrage-Antwort-Lauf reicht `open_tasks_context` durch.
+289 Tests grün, `ruff`/`mypy --strict` sauber.
 
 ---
 

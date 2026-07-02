@@ -45,6 +45,22 @@ def _repo() -> Repository:
     return Repository(sqlite3.connect(":memory:", check_same_thread=False))
 
 
+@pytest.fixture(autouse=True)
+def _passthrough_gap_check() -> object:
+    """Zweiten Durchgang (Schritt 8.18) als Passthrough neutralisieren.
+
+    Die Orchestrator-Integrationstests mocken nur den ersten Durchgang
+    (``run_extraction``); ohne diesen Patch liefe der zweite Durchgang
+    (``run_gap_check``) gegen ein echtes Modell. Als Identität gemockt gibt er das
+    Erstergebnis unverändert zurück — deterministisch und ohne Netz.
+    """
+    with patch(
+        "kollege.orchestrator.run_gap_check",
+        side_effect=lambda original_transcript, first_result, *a, **k: first_result,
+    ):
+        yield
+
+
 @pytest.fixture
 def log_dir(tmp_path: Path) -> Path:
     return tmp_path / "logs"

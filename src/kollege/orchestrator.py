@@ -58,6 +58,7 @@ from kollege.models import (
     ExtractedContact,
     ExtractedProjectUpdate,
     ExtractedTask,
+    ExtractedTaskEdit,
     ExtractionResult,
     Project,
     Task,
@@ -117,7 +118,13 @@ def format_date_de(d: date) -> str:
 # Typalias für die drei möglichen Extraktionsobjekte
 # ---------------------------------------------------------------------------
 
-_Item = ExtractedContact | ExtractedTask | ExtractedProjectUpdate | ExtractedCompletion
+_Item = (
+    ExtractedContact
+    | ExtractedTask
+    | ExtractedProjectUpdate
+    | ExtractedCompletion
+    | ExtractedTaskEdit
+)
 
 # ---------------------------------------------------------------------------
 # Regex für Nutzereingaben im Bestätigungs-Dialog
@@ -300,7 +307,26 @@ def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
         items.append((f"📁 Projekt: {pu.project}{status_str}", pu))
     for comp in result.completed:
         items.append((f"✅ Aufgabe schließen: #{comp.task_id} {comp.task_title}", comp))
+    for ed in result.edits:
+        items.append((f"✏️ Aufgabe ändern: #{ed.task_id} {ed.task_title} — {_edit_changes(ed)}", ed))
     return items
+
+
+def _edit_changes(ed: ExtractedTaskEdit) -> str:
+    """Menschenlesbare Zusammenfassung der geänderten Felder einer Aufgabe.
+
+    Zeigt für jedes gesetzte ``new_*``-Feld die Zieländerung, damit die Nutzerin
+    schon VOR der Bestätigung sieht, was geändert wird. Ohne gesetztes Feld
+    (sollte nicht vorkommen) ein neutraler Hinweis.
+    """
+    parts: list[str] = []
+    if ed.new_title is not None:
+        parts.append(f"Titel → «{ed.new_title}»")
+    if ed.new_due is not None:
+        parts.append(f"Frist → {format_date_de(ed.new_due)}")
+    if ed.new_project is not None:
+        parts.append(f"Projekt → {ed.new_project}")
+    return ", ".join(parts) if parts else "(keine Änderung)"
 
 
 def _parse_selection(text: str) -> list[int]:
@@ -357,11 +383,19 @@ def dedupe_result(result: ExtractionResult) -> ExtractionResult:
             seen_completions.add(comp.task_id)
             completions.append(comp)
 
+    seen_edits: set[int] = set()
+    edits: list[ExtractedTaskEdit] = []
+    for ed in result.edits:
+        if ed.task_id not in seen_edits:
+            seen_edits.add(ed.task_id)
+            edits.append(ed)
+
     return ExtractionResult(
         contacts=contacts,
         tasks=tasks,
         project_updates=updates,
         completed=completions,
+        edits=edits,
         clarification=result.clarification,
     )
 
@@ -406,6 +440,11 @@ def _format_task_entry(et: ExtractedTask) -> str:
     return f"Neue Aufgabe: {et.title}{due}"
 
 
+def _format_task_edit_entry(ed: ExtractedTaskEdit) -> str:
+    """Log-Eintrag für die Änderung einer bestehenden Aufgabe (append-only, 8.19)."""
+    return f"Aufgabe geändert: {ed.task_title} — {_edit_changes(ed)}"
+
+
 def persist_result(
     result: ExtractionResult,
     indices: list[int] | None,
@@ -425,6 +464,7 @@ def persist_result(
     tasks_to_save: list[ExtractedTask] = []
     updates_to_save: list[ExtractedProjectUpdate] = []
     completions_to_save: list[ExtractedCompletion] = []
+    edits_to_save: list[ExtractedTaskEdit] = []
 
     for i, (_, obj) in enumerate(items):
         if i not in selected:
@@ -437,6 +477,8 @@ def persist_result(
             updates_to_save.append(obj)
         elif isinstance(obj, ExtractedCompletion):
             completions_to_save.append(obj)
+        elif isinstance(obj, ExtractedTaskEdit):
+            edits_to_save.append(obj)
 
     count = 0
 
@@ -497,6 +539,35 @@ def persist_result(
         with contextlib.suppress(ValueError):
             repo.mark_task_done(comp.task_id)
             count += 1
+
+    # 5. Änderungen an bestehenden Aufgaben (Schritt 8.19). new_project wird zu einer
+    # project_id aufgelöst (bei Bedarf angelegt); nur gesetzte Felder werden geändert.
+    # Hängt die (geänderte) Aufgabe an einem Projekt mit Log, wird die Korrektur dort
+    # append-only vermerkt (Log-Konsistenz, Prinzip 4). Eine nicht mehr vorhandene
+    # Aufgabe wird übersprungen statt den ganzen Lauf abzubrechen.
+    for ed in edits_to_save:
+        new_project_id: int | None = None
+        if ed.new_project:
+            p = repo.get_or_create_project(ed.new_project)
+            if p.markdown_log_path is None:
+                open_project_log(p, log_dir)
+                repo.update_project(p)
+            new_project_id = p.id
+        try:
+            updated = repo.update_task(
+                ed.task_id,
+                title=ed.new_title,
+                due=ed.new_due,
+                project_id=new_project_id,
+            )
+        except ValueError:
+            continue
+        if updated.project_id is not None:
+            edit_project = repo.get_project_by_id(updated.project_id)
+            if edit_project is not None and edit_project.markdown_log_path is not None:
+                log = open_project_log(edit_project, log_dir)
+                log.append_entry(_format_task_edit_entry(ed), source="Sprachnotiz")
+        count += 1
 
     return count
 
@@ -870,6 +941,7 @@ class Orchestrator:
 
         logger.info("Rückfrage-Antwort-Lauf für %s: %r", sender, answer[:80])
         known_names = get_known_names_context(self._repo)
+        open_tasks = get_open_tasks_context(self._repo)
         try:
             result = dedupe_result(
                 run_clarification_response(
@@ -878,6 +950,7 @@ class Orchestrator:
                     answer=answer,
                     settings=self._settings,
                     known_names_context=known_names,
+                    open_tasks_context=open_tasks,
                     history=pending.history,
                 )
             )
@@ -950,6 +1023,7 @@ class Orchestrator:
         proposal = self._pending[sender]
         logger.info("Korrektur-Lauf für %s: %r", sender, correction_text[:80])
         known_names = get_known_names_context(self._repo)
+        open_tasks = get_open_tasks_context(self._repo)
         try:
             revised = dedupe_result(
                 run_revision(
@@ -958,6 +1032,7 @@ class Orchestrator:
                     correction=correction_text,
                     settings=self._settings,
                     known_names_context=known_names,
+                    open_tasks_context=open_tasks,
                     history=proposal.history,
                 )
             )
