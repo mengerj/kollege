@@ -12,21 +12,23 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.14 — Vollständige Historie pro Pending-Proposal.**
+**Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands.**
 
-Aus einem Live-Test (mistral3.1-medium via OpenRouter) kam ein Bündel an
-Erkenntnissen; daraus ein priorisierter Block **8.14 → 8.15 → 8.16 → 8.17**,
-der vor der E-Mail-Integration (Schritt 9) abgearbeitet wird. Details je Schritt
-weiter unten; Herleitung siehe [PROJECT_LOG.md](PROJECT_LOG.md) (Eintrag 2026-07-02).
+Teil des priorisierten Blocks **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
+(mistral3.1-medium via OpenRouter), der vor der E-Mail-Integration (Schritt 9)
+abgearbeitet wird. Details je Schritt weiter unten; Herleitung siehe
+[PROJECT_LOG.md](PROJECT_LOG.md) (Einträge 2026-07-02).
 
-Jetzt konkret **Schritt 8.14**: Korrektur- und Rückfrage-Läufe scheitern an
-Referenzen wie *„…die Telefonnummer wie in der letzten Nachricht"*, weil
+**Schritt 8.14 ist erledigt:** `PendingProposal`/`PendingClarification` führen jetzt
+eine `history` (alle Turns einer laufenden Interaktion), die an
 [`run_revision`](src/kollege/agent/__init__.py) und
-[`run_clarification_response`](src/kollege/agent/__init__.py) **kein Gedächtnis
-über die Turns einer Interaktion** haben — sie sehen nur (Ursprungstranskript +
-aktueller Vorschlag + ein Korrekturtext). `PendingProposal`/`PendingClarification`
-bekommen eine `history` (alle Turns *einer* Interaktion), die den Läufen
-mitgegeben wird. Details unten in Schritt 8.14.
+[`run_clarification_response`](src/kollege/agent/__init__.py) durchgereicht wird —
+Referenzen wie *„…wie in der letzten Nachricht"* über mehrere Korrektur-/Rückfrage-
+Runden hinweg sind damit auflösbar.
+
+Jetzt konkret **Schritt 8.15**: Abfragen des DB-Standes über deterministische
+Kommandos (`/offen`, `/dringend`, `/kontakte`, `/projekte`, `/erledigt <id>`,
+`/hilfe`) — ohne LLM, schnell, zuverlässig. Details/DoD unten in Schritt 8.15.
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -63,8 +65,8 @@ mitgegeben wird. Details unten in Schritt 8.14.
 | 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
 | 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen (hinter 8.14–8.17 zurückgestellt) |
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
-| 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ▶ nächster Schritt |
-| 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ⬜ offen |
+| 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ✅ erledigt |
+| 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ▶ nächster Schritt |
 | 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ⬜ offen |
 | 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
@@ -514,7 +516,7 @@ Herleitung und Live-Log siehe [PROJECT_LOG.md](PROJECT_LOG.md), Eintrag
 Human-in-the-loop (extrahieren → vorschlagen → bestätigen), lokal-first,
 Datensparsamkeit.*
 
-### Schritt 8.14 — Vollständige Historie pro Pending-Proposal ▶
+### Schritt 8.14 — Vollständige Historie pro Pending-Proposal ✅
 
 **Problem (aus Live-Test).** Die Nutzerin zitiert-antwortet auf einen Vorschlag
 mit *„Ich möchte zusätzlich seine Telefonnummer einspeichern (wie in der letzten
@@ -539,9 +541,14 @@ laufen daher ins Leere.
   senderweites Dauergedächtnis, **keine** Cross-Notiz-Referenzen — deckt sich mit
   der bestätigten Regel „neue Nachricht = neue Notiz".
 
-**DoD.** Ein `FunctionModel`-Test zeigt: eine Korrektur, die auf einen in einem
-früheren Turn derselben Interaktion genannten Wert verweist, landet im Ergebnis.
-`ruff`/`mypy`/`pytest` grün. Kein echter LLM-Aufruf im CI.
+**DoD.** ✅ Ein `FunctionModel`-Test
+(`test_run_revision_uses_history_to_resolve_earlier_reference`) zeigt: dieselbe
+Korrektur liefert ohne `history` keinen Wert zurück, mit `history` (die frühere
+Korrektur-Nachricht) landet der referenzierte Wert im Ergebnis. `history` ist als
+zusätzliches optionales Argument an `run_revision()`/`run_clarification_response()`
+angehängt (statt `original_transcript`/`correction`/`answer` zu ersetzen) und wird
+in `_revise()`/`_answer_clarification()` bei jedem Übergang fortgeschrieben.
+`ruff`/`mypy`/`pytest` grün (224 Tests), kein echter LLM-Aufruf im CI.
 
 ### Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands ⬜
 

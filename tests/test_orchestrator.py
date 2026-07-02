@@ -616,6 +616,60 @@ def test_thumbsup_on_clarification_uses_original_transcript(
     assert kwargs["clarification_question"] == "Welches Projekt meinst du?"
 
 
+def test_first_clarification_answer_passes_empty_history(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Die erste Rückfrage-Antwort einer Interaktion hat noch keine Vorgeschichte."""
+    _prime_clarification(orc, channel)
+    with patch(
+        "kollege.orchestrator.run_clarification_response", return_value=_result_task()
+    ) as mock_resp:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ja, als Dienstleister"))
+    assert mock_resp.call_args.kwargs["history"] == []
+
+
+def test_resolved_clarification_stores_qa_in_proposal_history(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Nach Auflösung einer Rückfrage trägt der neue Vorschlag Frage+Antwort als Historie."""
+    _prime_clarification(orc, channel)
+    with patch("kollege.orchestrator.run_clarification_response", return_value=_result_task()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ja, als Dienstleister"))
+    assert orc._pending[SENDER].history == [
+        ("Rückfrage", "Welches Projekt meinst du?"),
+        ("Antwort", "Ja, als Dienstleister"),
+    ]
+
+
+def test_repeated_clarification_accumulates_history(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Bleibt es nach der Antwort unklar, akkumuliert die neue Rückfrage die Historie."""
+    _prime_clarification(orc, channel)
+    followup = ExtractionResult(clarification="Welcher Nachname genau?")
+    with patch("kollege.orchestrator.run_clarification_response", return_value=followup):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Der Neue"))
+    assert orc._pending_clarifications[SENDER].history == [
+        ("Rückfrage", "Welches Projekt meinst du?"),
+        ("Antwort", "Der Neue"),
+    ]
+
+    with patch(
+        "kollege.orchestrator.run_clarification_response", return_value=_result_task()
+    ) as mock_resp:
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Schmidt"))
+    assert mock_resp.call_args.kwargs["history"] == [
+        ("Rückfrage", "Welches Projekt meinst du?"),
+        ("Antwort", "Der Neue"),
+    ]
+    assert orc._pending[SENDER].history == [
+        ("Rückfrage", "Welches Projekt meinst du?"),
+        ("Antwort", "Der Neue"),
+        ("Rückfrage", "Welcher Nachname genau?"),
+        ("Antwort", "Schmidt"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Dedup im Verarbeitungsfluss
 # ---------------------------------------------------------------------------
@@ -888,3 +942,94 @@ def test_pending_stores_sent_timestamp(orc: Orchestrator, channel: MemoryChannel
         orc.handle_message(IncomingMessage(sender=SENDER, text="Notiz"))
     # MemoryChannel.send() gibt None zurück — kein Crash, Wert ist None
     assert orc._pending[SENDER].sent_timestamp is None  # MemoryChannel liefert None
+
+
+# ---------------------------------------------------------------------------
+# Vollständige Interaktions-Historie (Schritt 8.14)
+# ---------------------------------------------------------------------------
+
+
+def test_first_revision_passes_empty_history(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Der erste Korrektur-Lauf einer Interaktion hat noch keine Vorgeschichte."""
+    _prime_pending(orc, channel)
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()) as mock_rev:
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Das ist nicht Herr Schnitt, sondern Schmidt",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+    assert mock_rev.call_args.kwargs["history"] == []
+
+
+def test_revision_stores_correction_in_history(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Nach einer Korrektur trägt der neue Vorschlag die Korrektur als Historien-Turn."""
+    _prime_pending(orc, channel)
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()):
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Das ist nicht Herr Schnitt, sondern Schmidt",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+    assert orc._pending[SENDER].history == [
+        ("Korrektur", "Das ist nicht Herr Schnitt, sondern Schmidt")
+    ]
+
+
+def test_second_revision_receives_first_correction_as_history(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Eine zweite Korrektur-Runde bekommt die erste Korrektur als history mitgegeben —
+    das behebt genau den Live-Fall aus 8.14 (Referenz auf »die letzte Nachricht«)."""
+    _prime_pending(orc, channel)
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()):
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Seine Nummer ist übrigens 08031/12345.",
+                quote_target_timestamp=1_111_111_111,
+            )
+        )
+
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()) as mock_rev:
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Trag zusätzlich die Nummer ein, wie eben gesagt.",
+                quote_target_timestamp=2_222_222_222,
+            )
+        )
+    assert mock_rev.call_args.kwargs["history"] == [
+        ("Korrektur", "Seine Nummer ist übrigens 08031/12345.")
+    ]
+    assert orc._pending[SENDER].history == [
+        ("Korrektur", "Seine Nummer ist übrigens 08031/12345."),
+        ("Korrektur", "Trag zusätzlich die Nummer ein, wie eben gesagt."),
+    ]
+
+
+def test_revision_after_resolved_clarification_carries_qa_history(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Eine Korrektur auf einen aus einer Rückfrage entstandenen Vorschlag bekommt die
+    Rückfrage+Antwort-Runde als Historie mit — die Interaktion umfasst beides."""
+    _prime_clarification(orc, channel)
+    with patch("kollege.orchestrator.run_clarification_response", return_value=_result_task()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ja, als Dienstleister"))
+    channel.sent.clear()
+
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()) as mock_rev:
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Nicht Müller, sondern Schmidt",
+                quote_target_timestamp=3_333_333_333,
+            )
+        )
+    assert mock_rev.call_args.kwargs["history"] == [
+        ("Rückfrage", "Welches Projekt meinst du?"),
+        ("Antwort", "Ja, als Dienstleister"),
+    ]
