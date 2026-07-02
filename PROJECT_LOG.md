@@ -51,6 +51,11 @@ Offene-Aufgaben-Kontext (keine persistierte Last-Batch-Referenz). Fallback-Pfad
 (schwache Modelle) unterstützt edits nicht (wie schon `completed`). Branch
 `feat/schritt-8.19-aufgaben-bearbeiten` (stapelt auf 8.18).
 
+**Nachtrag (UX).** Der Vorschlagstext (`format_proposal`) erklärte bisher nur
+👍/„ja"/„nein", nicht aber die **Korrektur per Zitat-Antwort** (Schritt 8.6). Jeder
+Vorschlag hängt jetzt einen Hinweis an (`_CORRECTION_HINT`): „Zum Korrigieren antworte
+auf diese Nachricht (Zitat) und sag, was anders soll …". Test in `test_orchestrator.py`.
+
 ---
 
 ## 2026-07-02 — Schritt 8.18 — Zwei-Durchgang-Extraktion + deutsche Datumsanzeige

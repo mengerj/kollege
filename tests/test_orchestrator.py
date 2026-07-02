@@ -176,6 +176,15 @@ def test_format_proposal_task_without_due_shows_kein_datum() -> None:
     assert "(kein Datum)" in text
 
 
+def test_format_proposal_mentions_correction_via_quote_reply() -> None:
+    """Jeder Vorschlag erklärt auch die Korrektur-Funktion (Zitat-Antwort), nicht nur ja/nein."""
+    single = format_proposal(ExtractionResult(tasks=[ExtractedTask(title="Eins")]))
+    multi = format_proposal(_result_contact_and_task())
+    for text in (single, multi):
+        assert "Zitat" in text
+        assert "korrigieren" in text.lower()
+
+
 # ---------------------------------------------------------------------------
 # dedupe_result
 # ---------------------------------------------------------------------------

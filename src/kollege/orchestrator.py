@@ -400,6 +400,15 @@ def dedupe_result(result: ExtractionResult) -> ExtractionResult:
     )
 
 
+# Hinweis auf die Korrektur-Schleife (Schritt 8.6): Eine Zitat-Antwort auf den
+# Vorschlag löst einen Revisions-Lauf aus. Wird jedem Vorschlag angehängt, weil der
+# Bestätigungstext bisher nur 👍/ja/nein erklärte — die Korrektur-Funktion aber nicht.
+_CORRECTION_HINT = (
+    "Zum Korrigieren antworte auf diese Nachricht (Zitat) und sag, was anders soll — "
+    "z. B. anderer Name, Datum oder Projekt."
+)
+
+
 def format_proposal(result: ExtractionResult) -> str:
     """Bestätigungstext aus ExtractionResult erzeugen."""
     items = _result_items(result)
@@ -415,6 +424,7 @@ def format_proposal(result: ExtractionResult) -> str:
             '\nAlles übernehmen? Schreib "ja" oder wähle Nummern (z.B. "1 3").'
             ' Abbrechen mit "nein".'
         )
+    lines.append(_CORRECTION_HINT)
     return "\n".join(lines)
 
 
