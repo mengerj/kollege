@@ -5,6 +5,43 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Schritt 8.14 — Vollständige Historie pro Pending-Proposal
+
+**Auslöser:** siehe Planungs-Eintrag weiter unten (selber Tag). Der Live-Fall: eine
+Zitat-Korrektur *„…Telefonnummer wie in der letzten Nachricht"* lief ins Leere, weil
+`run_revision`/`run_clarification_response` nur (Ursprungstranskript + aktueller
+Vorschlag + ein Korrekturtext) sahen — der Rohtext einer *vorherigen* Korrektur-
+Runde derselben Interaktion ging beim Übergang zur nächsten Runde verloren.
+
+**Getan:**
+- `PendingProposal` und `PendingClarification` ([`orchestrator.py`](src/kollege/orchestrator.py))
+  bekommen ein Feld `history: list[tuple[str, str]]` — (Label, Text)-Paare aller
+  vorangegangenen Turns *dieser* Interaktion (Rückfrage/Antwort/Korrektur), in
+  Reihenfolge, ohne das Ursprungstranskript (bleibt in `.transcript`) und ohne den
+  aktuellen Turn (der wird weiterhin über die bestehenden Parameter übergeben).
+- `run_revision()`/`run_clarification_response()` ([`agent/__init__.py`](src/kollege/agent/__init__.py))
+  bekommen ein neues optionales `history`-Argument und stellen einen formatierten
+  Historie-Block dem Prompt voran (`_format_history`), zusätzlich zum bisherigen
+  Ursprungstranskript/aktuellen Vorschlag/aktueller Korrektur.
+- Verdrahtung in `_revise()` und `_answer_clarification()`: history wird bei jedem
+  Übergang (Korrektur→Korrektur, Rückfrage→Antwort→Vorschlag, Rückfrage→Antwort→
+  neue Rückfrage) fortgeschrieben und an den jeweils nächsten Lauf weitergereicht.
+- **Scope-Grenze eingehalten:** history lebt ausschließlich am Pending-Objekt im
+  Arbeitsspeicher und wird bei Bestätigung/Ablehnung mit diesem verworfen — kein
+  senderweites Dauergedächtnis, keine Cross-Notiz-Referenzen.
+
+**Tests:** FunctionModel-Test (`test_run_revision_uses_history_to_resolve_earlier_reference`)
+zeigt konkret: dieselbe Korrektur liefert ohne `history` keinen Telefonwert, mit
+`history` (die frühere Korrektur-Nachricht mit der Nummer) liefert sie ihn korrekt —
+belegt, dass die History der entscheidende Kanal ist. Dazu Prompt-Komposition-Tests
+für beide Agent-Funktionen und Orchestrator-Tests für Akkumulation über mehrere
+Korrektur-/Rückfrage-Runden hinweg (inkl. Übergang Rückfrage→Vorschlag→Korrektur).
+Gesamt grün: 224 passed. Ruff + mypy sauber.
+
+**Nächster Schritt:** **8.15** — Query-Funktionen + deutsche Slash-Commands.
+
+---
+
 ## 2026-07-02 — Planung: Nutzbarkeits-Block 8.14–8.17 (aus Live-Test)
 
 **Auslöser:** Live-Test mit `mistral3.1-medium` (via OpenRouter). Der Extraktions-

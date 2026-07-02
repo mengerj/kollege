@@ -256,3 +256,131 @@ def test_run_clarification_response_builds_prompt() -> None:
     assert "Neuen Kontakt anlegen?" in prompt
     assert "Ja." in prompt
     assert "RÜCKFRAGE-ANTWORT" in prompt
+
+
+# --------------------------------------------------------------------------- #
+# history — vollständige Interaktions-Historie (Schritt 8.14)                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_revision_without_history_omits_history_block() -> None:
+    """Ohne history-Argument enthält der Prompt keinen Historie-Block (Default)."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_revision
+
+    captured: dict[str, str] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_revision(
+            original_transcript="Herr Schmidt ruft an.",
+            current_result=ExtractionResult(),
+            correction="Nicht Schmidt, sondern Schnitt.",
+            settings=Settings(),
+        )
+
+    assert "Bisherige Turns" not in captured["prompt"]
+
+
+def test_run_revision_includes_history_block() -> None:
+    """Ein history-Argument wird als eigener Block vor dem Transkript eingefügt."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_revision
+
+    captured: dict[str, str] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_revision(
+            original_transcript="Herr Schmidt ruft an.",
+            current_result=ExtractionResult(),
+            correction="Trag auch seine Nummer ein, wie eben gesagt.",
+            settings=Settings(),
+            history=[("Korrektur", "Seine Nummer ist übrigens 08031/12345.")],
+        )
+
+    prompt = captured["prompt"]
+    assert "Bisherige Turns dieser Interaktion" in prompt
+    assert "[Korrektur] Seine Nummer ist übrigens 08031/12345." in prompt
+    # Historie-Block steht vor dem Ursprungstranskript
+    assert prompt.index("Bisherige Turns") < prompt.index("Ursprüngliches Transkript")
+
+
+def test_run_clarification_response_includes_history_block() -> None:
+    """history wird auch im Rückfrage-Antwort-Prompt vorangestellt."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_clarification_response
+
+    captured: dict[str, str] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_clarification_response(
+            original_transcript="Kräutergarten Aibling als Dienstleister",
+            clarification_question="Welcher Nachname genau?",
+            answer="Schmidt.",
+            settings=Settings(),
+            history=[("Rückfrage", "Neuen Kontakt anlegen?"), ("Antwort", "Ja.")],
+        )
+
+    prompt = captured["prompt"]
+    assert "[Rückfrage] Neuen Kontakt anlegen?" in prompt
+    assert "[Antwort] Ja." in prompt
+
+
+def test_run_revision_uses_history_to_resolve_earlier_reference() -> None:
+    """FunctionModel-Test (Schritt 8.14 DoD): Eine Korrektur, die auf einen Wert aus
+    einem früheren Turn derselben Interaktion verweist ("wie eben gesagt"), landet
+    im Ergebnis — weil dieser frühere Turn über ``history`` im Prompt steht.
+
+    Ohne history (oder wenn die Telefonnummer nicht im Prompt vorkommt) liefert das
+    FunctionModel bewusst keinen Telefon-Wert zurück, um zu zeigen, dass die
+    History tatsächlich der entscheidende Kanal ist — nicht Zufall.
+    """
+    from unittest.mock import patch
+
+    from kollege.agent import run_revision
+    from kollege.models import ExtractedContact
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        full = " ".join(
+            str(part.content) for msg in messages for part in msg.parts if hasattr(part, "content")
+        )
+        phone = "08031/12345" if "08031/12345" in full else None
+        result = ExtractionResult(contacts=[ExtractedContact(name="Herr Schmidt", phone=phone)])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args=result.model_dump_json())]
+        )
+
+    model = FunctionModel(fn)
+    current = ExtractionResult(contacts=[ExtractedContact(name="Herr Schmidt")])
+
+    with patch("kollege.agent.build_model", return_value=model):
+        without_history = run_revision(
+            original_transcript="Herr Schmidt vom Gartenbau ruft an.",
+            current_result=current,
+            correction="Trag zusätzlich seine Nummer ein, wie eben gesagt.",
+            settings=Settings(),
+        )
+        with_history = run_revision(
+            original_transcript="Herr Schmidt vom Gartenbau ruft an.",
+            current_result=current,
+            correction="Trag zusätzlich seine Nummer ein, wie eben gesagt.",
+            settings=Settings(),
+            history=[("Korrektur", "Seine Nummer ist übrigens 08031/12345.")],
+        )
+
+    assert without_history.contacts[0].phone is None
+    assert with_history.contacts[0].phone == "08031/12345"

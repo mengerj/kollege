@@ -423,12 +423,28 @@ def _format_result_for_revision(result: ExtractionResult) -> str:
     return "\n".join(lines) if lines else "  (leer)"
 
 
+def _format_history(history: list[tuple[str, str]] | None) -> str:
+    """Formatiert frühere Turns derselben Interaktion als Prompt-Block (Schritt 8.14).
+
+    ``history`` enthält Turns *vor* dem aktuellen (z. B. frühere Korrekturen oder
+    eine Rückfrage+Antwort), damit Referenzen wie »wie in der letzten Nachricht«
+    über mehrere Korrektur-Runden hinweg aufgelöst werden können — nicht nur
+    gegen das Ursprungstranskript und den zuletzt strukturierten Vorschlag.
+    Gibt einen leeren String zurück, wenn keine Historie vorliegt.
+    """
+    if not history:
+        return ""
+    lines = [f"  [{label}] {text}" for label, text in history]
+    return "Bisherige Turns dieser Interaktion:\n" + "\n".join(lines) + "\n\n"
+
+
 def run_revision(
     original_transcript: str,
     current_result: ExtractionResult,
     correction: str,
     settings: Settings,
     known_names_context: str | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> ExtractionResult:
     """Revidiert ein ExtractionResult anhand eines Korrekturhinweises.
 
@@ -436,16 +452,25 @@ def run_revision(
     Korrekturtext. Es liefert ein überarbeitetes ExtractionResult, das erneut
     als Vorschlag angezeigt wird (nichts wird bis zur Bestätigung persistiert).
 
+    ``history``: frühere Turns *derselben Interaktion* (z. B. vorangegangene
+    Korrekturen oder eine Rückfrage+Antwort), geordnet, ohne das Ursprungs-
+    transkript und ohne die aktuelle Korrektur (die stehen bereits in eigenen
+    Parametern). Löst Referenzen wie »wie in der letzten Nachricht« über
+    mehrere Korrektur-Runden hinweg auf (Schritt 8.14).
+
     Intern wird ``run_extraction`` auf einem zusammengesetzten Prompt aufgerufen —
     so wird der gesamte Primär-/Fallback-Pfad wiederverwendet, inklusive
     Namensabgleich via ``known_names_context``.
     """
     revision_prompt = (
         "[KORREKTUR-LAUF]\n"
+        f"{_format_history(history)}"
         f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
         f"Bisheriger Vorschlag:\n{_format_result_for_revision(current_result)}\n\n"
         f"Korrektur:\n{correction}\n\n"
-        "Überarbeite den Vorschlag entsprechend der Korrektur. "
+        "Überarbeite den Vorschlag entsprechend der Korrektur. Falls die Korrektur "
+        "auf einen früheren Turn dieser Interaktion verweist (z. B. »wie in der "
+        "letzten Nachricht«), nutze die oben stehende Historie. "
         "Extrahiere das korrigierte Ergebnis vollständig."
     )
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
@@ -460,6 +485,7 @@ def run_clarification_response(
     answer: str,
     settings: Settings,
     known_names_context: str | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> ExtractionResult:
     """Beantwortet eine zuvor gestellte Rückfrage und extrahiert erneut.
 
@@ -473,20 +499,26 @@ def run_clarification_response(
     Ablehnung bleibt das Ergebnis leer; liefert die Antwort neue Angaben, fließen
     sie ein. Nur bei weiterhin echter Unklarheit wird erneut eine Rückfrage gestellt.
 
+    ``history``: frühere Turns *derselben Interaktion* vor dieser Rückfrage
+    (z. B. eine vorangegangene Rückfrage+Antwort-Runde), siehe ``run_revision``
+    (Schritt 8.14).
+
     Intern wird — wie bei ``run_revision`` — ``run_extraction`` auf einem
     zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad und
     Namensabgleich unverändert wiederverwendet werden.
     """
     response_prompt = (
         "[RÜCKFRAGE-ANTWORT]\n"
+        f"{_format_history(history)}"
         f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
         f"Deine Rückfrage an die Nutzerin:\n{clarification_question}\n\n"
         f"Antwort der Nutzerin:\n{answer}\n\n"
         "Setze die Extraktion jetzt vollständig um. Bei Zustimmung (z. B. »ja«, »👍«, "
         "»passt«) lege die in der Rückfrage angebotenen Einträge an. Bei Ablehnung "
         "(»nein«) extrahiere nichts. Liefert die Antwort zusätzliche Angaben, "
-        "berücksichtige sie. Stelle nur dann erneut eine Rückfrage, wenn weiterhin "
-        "etwas Wesentliches unklar bleibt."
+        "berücksichtige sie. Falls sich die Antwort auf einen früheren Turn dieser "
+        "Interaktion bezieht, nutze die oben stehende Historie. Stelle nur dann "
+        "erneut eine Rückfrage, wenn weiterhin etwas Wesentliches unklar bleibt."
     )
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
     return run_extraction(

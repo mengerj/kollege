@@ -15,7 +15,12 @@ wird mit dem Ursprungstranskript neu extrahiert (Rückfrage-Antwort-Schleife).
 
 Pending-State: pro Absender (Rufnummer) genau *ein* offener Zustand im
 Arbeitsspeicher — entweder ein ``PendingProposal`` (wartet auf Bestätigung) oder
-eine ``PendingClarification`` (wartet auf Antwort), nie beides gleichzeitig.
+eine ``PendingClarification`` (wartet auf Antwort), nie beides gleichzeitig. Beide
+führen ein ``history``-Feld: alle vorangegangenen Turns derselben Interaktion
+(Rückfragen, Antworten, Korrekturen), damit Referenzen wie »wie in der letzten
+Nachricht« über mehrere Runden hinweg auflösbar bleiben (Schritt 8.14). Die
+Historie ist strikt an eine laufende Interaktion gebunden und wird bei
+Bestätigung/Ablehnung verworfen — kein senderweites Dauergedächtnis.
 """
 
 from __future__ import annotations
@@ -136,6 +141,13 @@ class PendingProposal:
     genauen Vorschlag. In Phase-A wird per Sender nur ein Vorschlag offen gehalten,
     daher ist jede Quote-Reply eindeutig — der Timestamp dient als Vorbereitung auf
     Stufe B (Korrektur bereits persistierter Einträge)."""
+    history: list[tuple[str, str]] = field(default_factory=list)
+    """Frühere Turns *dieser* Interaktion vor dem aktuellen Vorschlag — z. B.
+    vorangegangene Korrekturen oder eine Rückfrage+Antwort-Runde, als
+    (Label, Text)-Paare in chronologischer Reihenfolge. Wird bei jeder weiteren
+    Korrektur an ``run_revision`` mitgegeben, damit Referenzen wie »wie in der
+    letzten Nachricht« über mehrere Runden hinweg auflösbar bleiben (Schritt 8.14).
+    Enthält *nicht* das Ursprungstranskript (steht in ``transcript``)."""
 
 
 @dataclass
@@ -153,6 +165,9 @@ class PendingClarification:
     transcript: str
     question: str
     created_at: datetime = field(default_factory=_now)
+    history: list[tuple[str, str]] = field(default_factory=list)
+    """Frühere Turns *dieser* Interaktion vor dieser Rückfrage — siehe
+    ``PendingProposal.history`` (Schritt 8.14)."""
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +637,7 @@ class Orchestrator:
                     answer=answer,
                     settings=self._settings,
                     known_names_context=known_names,
+                    history=pending.history,
                 )
             )
         except Exception:
@@ -632,6 +648,9 @@ class Orchestrator:
             )
             return
 
+        # Diese Rückfrage+Antwort-Runde wird Teil der Historie für den nächsten Turn.
+        new_history = [*pending.history, ("Rückfrage", pending.question), ("Antwort", answer)]
+
         # Weiterhin unklar → Rückfrage aktualisieren, Klärung bleibt offen.
         if result.clarification:
             logger.info("Rückfrage-Antwort: erneute Rückfrage")
@@ -639,6 +658,7 @@ class Orchestrator:
                 sender=sender,
                 transcript=pending.transcript,
                 question=result.clarification,
+                history=new_history,
             )
             self._channel.send(sender, f"Rückfrage: {result.clarification}")
             return
@@ -652,7 +672,9 @@ class Orchestrator:
             return
 
         # Konkrete Einträge → normaler Vorschlag mit Bestätigungs-Loop.
-        proposal = PendingProposal(sender=sender, transcript=pending.transcript, result=result)
+        proposal = PendingProposal(
+            sender=sender, transcript=pending.transcript, result=result, history=new_history
+        )
         proposal.sent_timestamp = self._channel.send(sender, format_proposal(result))
         self._pending[sender] = proposal
         logger.info(
@@ -695,6 +717,7 @@ class Orchestrator:
                     correction=correction_text,
                     settings=self._settings,
                     known_names_context=known_names,
+                    history=proposal.history,
                 )
             )
         except Exception:
@@ -718,10 +741,12 @@ class Orchestrator:
             )
             return
 
+        # Diese Korrektur wird Teil der Historie für eine etwaige nächste Runde.
         new_proposal = PendingProposal(
             sender=sender,
             transcript=proposal.transcript,
             result=revised,
+            history=[*proposal.history, ("Korrektur", correction_text)],
         )
         new_proposal.sent_timestamp = self._channel.send(sender, format_proposal(revised))
         self._pending[sender] = new_proposal
