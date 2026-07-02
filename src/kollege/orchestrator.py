@@ -37,7 +37,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from kollege.agent import (
@@ -45,6 +45,7 @@ from kollege.agent import (
     get_open_tasks_context,
     run_clarification_response,
     run_extraction,
+    run_gap_check,
     run_revision,
 )
 from kollege.channels import Channel, IncomingMessage
@@ -71,6 +72,7 @@ __all__ = [
     "PendingProposal",
     "dedupe_result",
     "format_contacts",
+    "format_date_de",
     "format_open_tasks",
     "format_projects",
     "format_proposal",
@@ -78,6 +80,38 @@ __all__ = [
 ]
 
 logger = logging.getLogger("kollege.orchestrator")
+
+# ---------------------------------------------------------------------------
+# Datumsanzeige für die Nutzerin (deutsch): "Do. 2. Juli 2026"
+# ---------------------------------------------------------------------------
+# Intern/gegenüber dem LLM bleibt ISO (YYYY-MM-DD); nur die an die Nutzerin
+# gesendeten Texte und die Markdown-Logs nutzen diese lesbare Form.
+
+_WEEKDAYS_DE_SHORT = ("Mo.", "Di.", "Mi.", "Do.", "Fr.", "Sa.", "So.")
+_MONTHS_DE = (
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+)
+
+
+def format_date_de(d: date) -> str:
+    """Datum menschenlesbar auf Deutsch: Wochentag + Tag, Monat, Jahr.
+
+    Beispiel: ``date(2026, 7, 2)`` → ``"Do. 2. Juli 2026"``. Ohne führende Null
+    beim Tag. Verwendet für alle an die Nutzerin gesendeten Fälligkeiten.
+    """
+    return f"{_WEEKDAYS_DE_SHORT[d.weekday()]} {d.day}. {_MONTHS_DE[d.month - 1]} {d.year}"
+
 
 # ---------------------------------------------------------------------------
 # Typalias für die drei möglichen Extraktionsobjekte
@@ -161,7 +195,7 @@ def format_open_tasks(tasks: list[Task]) -> str:
         return "Keine offenen Aufgaben."
     lines = []
     for t in tasks:
-        due = f", fällig: {t.due}" if t.due else ""
+        due = f", fällig: {format_date_de(t.due)}" if t.due else ""
         lines.append(f"#{t.id} {t.title}{due}")
     return "\n".join(lines)
 
@@ -258,7 +292,7 @@ def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
     for t in result.tasks:
         # due wird IMMER angezeigt — auch "(kein Datum)" —, damit der Nutzer ein
         # fehlendes/falsches Datum schon VOR der Bestätigung erkennt.
-        due = f", fällig: {t.due}" if t.due else ", fällig: (kein Datum)"
+        due = f", fällig: {format_date_de(t.due)}" if t.due else ", fällig: (kein Datum)"
         proj = f" [{t.project}]" if t.project else ""
         items.append((f"📋 Aufgabe: {t.title}{proj}{due}", t))
     for pu in result.project_updates:
@@ -368,7 +402,7 @@ def _format_project_update_entry(pu: ExtractedProjectUpdate) -> str:
 
 def _format_task_entry(et: ExtractedTask) -> str:
     """Menschenlesbaren Log-Eintrag für eine neue projektbezogene Aufgabe formulieren."""
-    due = f" — fällig: {et.due}" if et.due else ""
+    due = f" — fällig: {format_date_de(et.due)}" if et.due else ""
     return f"Neue Aufgabe: {et.title}{due}"
 
 
@@ -716,18 +750,55 @@ class Orchestrator:
         return msg.text
 
     def _extract(self, transcript: str) -> ExtractionResult:
-        """Agent gegen temporäres In-Memory-Repo — kein echter DB-Schreibzugriff.
+        """Zwei-Durchgang-Extraktion gegen temporäre In-Memory-Repos (Schritt 8.18).
 
-        Bekannte Kontakt-/Projektnamen aus dem echten Repository werden dem
-        Transkript vorangestellt, damit das LLM Whisper-Verhörer normalisieren kann.
+        Bekannte Kontakt-/Projektnamen und offene Aufgaben aus dem echten Repository
+        werden dem Transkript vorangestellt (Namensabgleich, Erledigungs-Abgleich).
+
+        **Erster Durchgang** (``_extract_first_pass``): der bisherige One-Shot mit
+        Retry bei transienten Fehlern. **Zweiter Durchgang** (``run_gap_check``):
+        prüft das Erstergebnis gegen das Transkript, füllt Lücken (fehlende Frist/
+        Projektzuordnung) und trägt Übersehenes nach. Läuft immer — außer der erste
+        Durchgang stellt bereits eine Rückfrage (die hat Vorrang). Scheitert der
+        zweite Durchgang, wird das Erstergebnis genutzt (best-effort, kein Abbruch).
+
+        Nur der Erst-Extraktionspfad ist zweistufig; Korrektur-/Rückfrage-Läufe
+        (``run_revision``/``run_clarification_response``) sind bereits von der
+        Nutzerin gesteuert und bleiben einstufig.
+        """
+        known_names = get_known_names_context(self._repo)
+        open_tasks = get_open_tasks_context(self._repo)
+
+        first = self._extract_first_pass(transcript, known_names, open_tasks)
+
+        # Rückfrage aus dem ersten Durchgang hat Vorrang — kein zweiter Lauf.
+        if first.clarification:
+            return first
+
+        try:
+            return run_gap_check(
+                transcript,
+                first,
+                self._settings,
+                known_names_context=known_names,
+                open_tasks_context=open_tasks,
+            )
+        except Exception:
+            logger.exception(
+                "Zweiter Durchgang (Lücken-Prüfung) fehlgeschlagen — nutze Erstergebnis"
+            )
+            return first
+
+    def _extract_first_pass(
+        self, transcript: str, known_names: str, open_tasks: str
+    ) -> ExtractionResult:
+        """Erster Extraktionsdurchgang mit Retry bei transienten Fehlern.
 
         Bei transienten Fehlern (z. B. Ollama gerade nicht erreichbar, RAM-Engpass)
         wird der Aufruf bis zu ``_EXTRACTION_RETRIES``-mal wiederholt. Die Wartezeit
         zwischen den Versuchen ist über ``retry_delay`` konfigurierbar (Standard
         ``_EXTRACTION_RETRY_DELAY`` s; in Tests auf 0.0 setzen).
         """
-        known_names = get_known_names_context(self._repo)
-        open_tasks = get_open_tasks_context(self._repo)
         last_exc: Exception = RuntimeError("Extraktion: kein Versuch unternommen")
         for attempt in range(_EXTRACTION_RETRIES):
             tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))

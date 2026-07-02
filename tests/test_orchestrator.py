@@ -32,6 +32,7 @@ from kollege.orchestrator import (
     Orchestrator,
     dedupe_result,
     format_contacts,
+    format_date_de,
     format_open_tasks,
     format_projects,
     format_proposal,
@@ -50,6 +51,23 @@ OTHER = "+4999999999"
 
 def _repo() -> Repository:
     return Repository(sqlite3.connect(":memory:", check_same_thread=False))
+
+
+@pytest.fixture(autouse=True)
+def _passthrough_gap_check() -> object:
+    """Zweiten Durchgang (Schritt 8.18) standardmäßig als Passthrough neutralisieren.
+
+    Die meisten Orchestrator-Tests mocken nur den *ersten* Durchgang
+    (``run_extraction``) und erwarten dessen Ergebnis unverändert im Vorschlag.
+    ``_extract`` ruft danach ``run_gap_check`` auf — hier als Identität gemockt
+    (gibt das Erstergebnis zurück), damit kein echtes Modell gebaut wird. Tests,
+    die den zweiten Durchgang gezielt prüfen, überschreiben diesen Patch lokal.
+    """
+    with patch(
+        "kollege.orchestrator.run_gap_check",
+        side_effect=lambda original_transcript, first_result, *a, **k: first_result,
+    ):
+        yield
 
 
 @pytest.fixture
@@ -139,7 +157,7 @@ def test_format_proposal_due_date() -> None:
         tasks=[ExtractedTask(title="Fristaufgabe", due=datetime.date(2026, 7, 15))]
     )
     text = format_proposal(result)
-    assert "fällig: 2026-07-15" in text
+    assert "fällig: Mi. 15. Juli 2026" in text  # deutsche Anzeige (Schritt 8.18)
 
 
 def test_format_proposal_project_update() -> None:
@@ -313,6 +331,30 @@ def test_persist_result_appends_multiple_entries_to_same_log(
 
 
 # ---------------------------------------------------------------------------
+# format_date_de — deutsche Datumsanzeige (Schritt 8.18)
+# ---------------------------------------------------------------------------
+
+
+def test_format_date_de_example() -> None:
+    """DoD-Beispiel: 2026-07-02 → »Do. 2. Juli 2026« (kein führende Null)."""
+    assert format_date_de(datetime.date(2026, 7, 2)) == "Do. 2. Juli 2026"
+
+
+def test_format_date_de_umlaut_month_and_weekday() -> None:
+    """März mit Umlaut, Montag als »Mo.«, zweistelliger Tag ohne Änderung."""
+    assert format_date_de(datetime.date(2026, 3, 30)) == "Mo. 30. März 2026"
+
+
+def test_format_date_de_shown_in_proposal_and_open_tasks() -> None:
+    """Fälligkeit wird im Vorschlag *und* in /offen deutsch formatiert angezeigt."""
+    due = datetime.date(2026, 12, 1)  # Dienstag
+    result = ExtractionResult(tasks=[ExtractedTask(title="Winterschnitt", due=due)])
+    assert "Di. 1. Dezember 2026" in format_proposal(result)
+    task = Task(id=7, title="Winterschnitt", due=due, status=TaskStatus.OFFEN)
+    assert "Di. 1. Dezember 2026" in format_open_tasks([task])
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator — normaler Ablauf
 # ---------------------------------------------------------------------------
 
@@ -340,6 +382,66 @@ def test_handle_clarification_sends_question(orc: Orchestrator, channel: MemoryC
     assert len(channel.sent) == 2  # Sofort-Quittung + Rückfrage
     assert "Rückfrage" in channel.sent[-1][1]
     assert SENDER not in orc._pending
+
+
+# ---------------------------------------------------------------------------
+# Zwei-Durchgang-Extraktion (Schritt 8.18)
+# ---------------------------------------------------------------------------
+
+
+def test_second_pass_enriches_and_fills_gaps(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Der zweite Durchgang füllt Lücken und trägt Übersehenes nach.
+
+    Erster Durchgang: eine Aufgabe ohne Frist. Zweiter Durchgang (``run_gap_check``):
+    ergänzt die Frist und eine im Text übersehene zweite Aufgabe. Der Vorschlag an
+    die Nutzerin muss das *angereicherte* Ergebnis zeigen.
+    """
+    first = ExtractionResult(tasks=[ExtractedTask(title="Angebot schicken")])
+    enriched = ExtractionResult(
+        tasks=[
+            ExtractedTask(title="Angebot schicken", due=datetime.date(2026, 7, 2)),
+            ExtractedTask(title="Vor dem Termin Unterlagen prüfen"),
+        ]
+    )
+    with (
+        patch("kollege.orchestrator.run_extraction", return_value=first),
+        patch("kollege.orchestrator.run_gap_check", return_value=enriched) as gap,
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Angebot an Müller"))
+
+    gap.assert_called_once()
+    # Erstergebnis wird als zweites Positionsargument an run_gap_check gereicht.
+    assert gap.call_args.args[1] is first
+    proposal = channel.sent[-1][1]
+    assert "Vor dem Termin Unterlagen prüfen" in proposal  # übersehene Aufgabe ergänzt
+    assert "Do. 2. Juli 2026" in proposal  # ergänzte Frist, deutsch formatiert
+    assert SENDER in orc._pending
+
+
+def test_clarification_in_first_pass_skips_second_pass(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Stellt der erste Durchgang eine Rückfrage, läuft kein zweiter Durchgang."""
+    with (
+        patch("kollege.orchestrator.run_extraction", return_value=_result_clarification()),
+        patch("kollege.orchestrator.run_gap_check") as gap,
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Irgendwas"))
+    gap.assert_not_called()
+    assert "Rückfrage" in channel.sent[-1][1]
+
+
+def test_second_pass_failure_falls_back_to_first_result(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Scheitert der zweite Durchgang, wird das Erstergebnis genutzt (kein Abbruch)."""
+    with (
+        patch("kollege.orchestrator.run_extraction", return_value=_result_task()),
+        patch("kollege.orchestrator.run_gap_check", side_effect=RuntimeError("LLM weg")),
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
+    assert "📋" in channel.sent[-1][1]  # Vorschlag aus Erstergebnis
+    assert SENDER in orc._pending
 
 
 def test_handle_audio_uses_transcriber(
@@ -1095,7 +1197,7 @@ def test_format_open_tasks_empty() -> None:
 
 def test_format_open_tasks_shows_id_title_due() -> None:
     text = format_open_tasks([Task(id=3, title="Zaun streichen", due=datetime.date(2026, 7, 5))])
-    assert text == "#3 Zaun streichen, fällig: 2026-07-05"
+    assert text == "#3 Zaun streichen, fällig: So. 5. Juli 2026"  # deutsche Anzeige (8.18)
 
 
 def test_format_contacts_empty() -> None:

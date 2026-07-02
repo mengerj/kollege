@@ -259,6 +259,53 @@ def test_run_clarification_response_builds_prompt() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# run_gap_check — Zweiter Durchgang / Lücken-Prüfung (Schritt 8.18)            #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_gap_check_builds_prompt() -> None:
+    """Der zweite Durchgang reicht Transkript + Erstergebnis an run_extraction.
+
+    Fehlende Frist/Projektzuordnung müssen im Prompt explizit als Lücke sichtbar
+    sein, damit das Modell sie füllen kann; Kontext (bekannte Namen, offene
+    Aufgaben) wird durchgereicht.
+    """
+    from unittest.mock import patch
+
+    from kollege.agent import run_gap_check
+    from kollege.models import ExtractedTask
+
+    captured: dict[str, object] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        captured["kwargs"] = kwargs
+        return ExtractionResult()
+
+    first = ExtractionResult(tasks=[ExtractedTask(title="Angebot schicken")])
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_gap_check(
+            original_transcript="Ich muss Müller ein Angebot schicken.",
+            first_result=first,
+            settings=Settings(),
+            known_names_context="[BEKANNTE NAMEN] Kontakte: Müller",
+            open_tasks_context="[OFFENE AUFGABEN] #1 Zaun streichen",
+        )
+
+    prompt = captured["prompt"]
+    assert isinstance(prompt, str)
+    assert "LÜCKEN-PRÜFUNG" in prompt
+    assert "Ich muss Müller ein Angebot schicken." in prompt
+    assert "Angebot schicken" in prompt
+    assert "OHNE Fälligkeitsdatum" in prompt  # Lücke explizit markiert
+    assert "OHNE Projektzuordnung" in prompt
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs.get("known_names_context") == "[BEKANNTE NAMEN] Kontakte: Müller"
+    assert kwargs.get("open_tasks_context") == "[OFFENE AUFGABEN] #1 Zaun streichen"
+
+
+# --------------------------------------------------------------------------- #
 # history — vollständige Interaktions-Historie (Schritt 8.14)                  #
 # --------------------------------------------------------------------------- #
 

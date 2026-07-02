@@ -12,26 +12,27 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden.**
+**Schritt 8.5 — restliche Live-Edge-Cases (interaktiv), Zwei-Durchgang validieren.**
+
+**Schritt 8.18 ist erledigt** (diese Session, interaktiv mit der Nutzerin): Die
+Extraktion ist jetzt **zweistufig** — nach dem ersten One-Shot prüft ein zweiter
+Durchgang (`run_gap_check`) das Ergebnis gegen das Transkript, füllt Lücken
+(fehlende Frist/Projektzuordnung) und trägt Übersehenes nach; Rückfrage nur bei
+echter Unklarheit, da der Bestätigungs-Loop begründetes Raten absichert. Dazu
+Datumsanzeige auf Deutsch (`format_date_de`, „Do. 2. Juli 2026"); intern bleibt ISO.
+
+**Konkret als Nächstes:** im nächsten **interaktiven** Live-Test beobachten, ob der
+zweite Durchgang die zuvor nötigen Korrekturen (Datum ergänzen, Projektbezug,
+übersehene Aufgabe) tatsächlich vermeidet — und die Rate an unnötigen Rückfragen
+prüfen (nicht zu geschwätzig werden). Auffälligkeiten ins Eval-Set (8.10) übernehmen.
+
+**Automatisierbare Alternative (falls keine Nutzerin verfügbar):** **Schritt 8.12**
+— DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden (reine Code-/Config-Arbeit,
+`build_model()` erweitern, Benchmark 8.11 nutzen). Details/DoD weiter unten.
 
 Der priorisierte Block **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
-(mistral3.1-medium via OpenRouter) ist mit Schritt 8.17 **abgeschlossen**
-(Details/Herleitung siehe [PROJECT_LOG.md](PROJECT_LOG.md), Einträge 2026-07-02).
-Der Schreib-/Abfragepfad ist damit stabil — 8.12 war genau darauf zurückgestellt.
-
-**Schritt 8.17 ist erledigt:** Erledigungs-Aussagen im Freitext werden gegen die
-offenen Aufgaben abgeglichen (`completed`-Feld, `build_open_tasks_context()`),
-als eigener Vorschlagstyp „✅ Aufgabe schließen" angezeigt und erst nach
-Bestätigung über `mark_task_done` (aus 8.15) geschlossen; bei Unsicherheit/
-Mehrdeutigkeit stellt der Agent eine Rückfrage statt zu raten.
-
-**Wahl für diesen Schritt (autonome Session, keine Nutzerin verfügbar):** von den
-beiden zurückgestellten Kandidaten — **8.5** (restliche Live-Edge-Cases) und
-**8.12** (EU-LLM-Anbieter) — ist 8.12 der besser automatisierbare nächste Schritt:
-reine Code-/Config-Arbeit (`build_model()` erweitern, Benchmark 8.11 nutzen), kein
-echtes Signal-Gerät/Docker-Linking nötig. 8.5 bleibt offen und sollte im nächsten
-**interaktiven** Live-Test mit der Nutzerin weiterlaufen. Details/DoD zu 8.12
-weiter unten.
+(mistral3.1-medium via OpenRouter) ist abgeschlossen; der Schreib-/Abfragepfad ist
+stabil, 8.18 hat die Extraktionsqualität darauf aufgesetzt verbessert.
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -69,6 +70,7 @@ weiter unten.
 | 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ✅ erledigt |
 | 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ✅ erledigt |
 | 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ✅ erledigt |
+| 8.18 | Zwei-Durchgang-Extraktion + deutsche Datumsanzeige | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -644,6 +646,51 @@ passender offener Aufgabe im Kontext erzeugt einen `completed`-Eintrag mit aus d
 Kontext übernommener `task_id`; Orchestrator-Tests zeigen „schließen"-Vorschlag →
 Bestätigung setzt Status auf `erledigt`; mehrdeutiger Fall → Rückfrage statt falsches
 Schließen. 268 Tests grün, `ruff`/`mypy --strict` sauber.
+
+### Schritt 8.18 — Zwei-Durchgang-Extraktion + deutsche Datumsanzeige ✅
+
+**Ziel.** Aus dem Live-Test: Der einstufige One-Shot lässt gelegentlich Dinge
+liegen — eine Aufgabe ohne Fälligkeit, obwohl der Text ein Timing nahelegt; eine
+Aufgabe ohne Projektzuordnung, obwohl andere Einträge derselben Nachricht dazu
+gehören; oder eine Aufgabe wird ganz übersehen. Der Assistent soll die Lücke
+**proaktiv selbst schließen**, statt eine Korrektur der Nutzerin abzuwarten.
+Zusätzlich: Datumsangaben an die Nutzerin lesbar auf Deutsch (Wochentag + Tag,
+Monat, Jahr, z. B. **„Do. 2. Juli 2026"**).
+
+**Kern-Einsicht.** Der Bestätigungs-Loop macht ein **begründetes Raten sicher**:
+Jeder Vorschlag wird vor der Persistenz gezeigt und lässt sich per Zitat-Antwort
+korrigieren. Der zweite Durchgang soll darum Lücken bevorzugt mit einer guten
+Vermutung füllen (im Vorschlag sichtbar) und nur bei **echter, wesentlicher**
+Unklarheit eine `clarification` stellen — genau der Punkt, der die häufigen
+Korrekturen vermeidet, ohne die Nutzerin mit Rückfragen zu überziehen.
+
+**Umsetzung.**
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): neue Funktion
+  `run_gap_check(transcript, first_result, …)` — bekommt Transkript **und**
+  Erstergebnis, prüft auf (1) Übersehenes, (2) fehlende Frist, (3) fehlende
+  Projekt-/(4) Kontaktzuordnung und liefert ein **vollständiges, ergänztes**
+  `ExtractionResult`. Reuse: baut wie `run_revision` einen zusammengesetzten
+  Prompt und ruft `run_extraction` auf (Primär-/Fallback-Pfad + Namensabgleich +
+  offene-Aufgaben-Kontext unverändert). Fehlende Felder werden im Prompt explizit
+  als Lücke markiert („OHNE Fälligkeitsdatum"/„OHNE Projektzuordnung").
+- [`orchestrator.py`](src/kollege/orchestrator.py): `_extract()` ist jetzt
+  **zweistufig** — erster Durchgang (`_extract_first_pass`, bisheriger One-Shot
+  mit Retry), dann `run_gap_check`. **Immer zwei Durchgänge**, außer der erste
+  stellt bereits eine Rückfrage (die hat Vorrang). Scheitert der zweite Durchgang,
+  wird das Erstergebnis genutzt (best-effort, kein Abbruch). Korrektur-/Rückfrage-
+  Läufe bleiben einstufig (bereits nutzergesteuert).
+- **Datumsanzeige:** `format_date_de(date)` in `orchestrator.py`
+  (`"Do. 2. Juli 2026"`, ohne führende Null) — verwendet in `format_proposal`,
+  `format_open_tasks` und den Markdown-Log-Einträgen. **Intern/gegenüber dem LLM
+  bleibt ISO** (`YYYY-MM-DD`), damit relative Fristen weiter korrekt aufgelöst
+  werden.
+
+**DoD.** ✅ `run_gap_check`-Prompt-Test (Transkript + Erstergebnis + explizite
+Lücken + durchgereichter Kontext); Orchestrator-Tests: zweiter Durchgang
+reichert an und trägt Übersehenes nach, Rückfrage im ersten Durchgang überspringt
+den zweiten, Fehler im zweiten Durchgang fällt aufs Erstergebnis zurück;
+`format_date_de`-Beispiele inkl. Umlaut-Monat + Anzeige in Vorschlag/`/offen`.
+275 Tests grün, `ruff`/`mypy --strict` sauber.
 
 ---
 
