@@ -338,6 +338,28 @@ def format_proposal(result: ExtractionResult) -> str:
     return "\n".join(lines)
 
 
+def _format_project_update_entry(pu: ExtractedProjectUpdate) -> str:
+    """Menschenlesbaren Log-Eintrag aus einem Projekt-Update formulieren."""
+    lines: list[str] = []
+    if pu.status is not None:
+        lines.append(f"Status: {pu.status}")
+    if pu.phase_note is not None:
+        lines.append(pu.phase_note)
+    if pu.next_action is not None:
+        lines.append(f"Nächster Schritt: {pu.next_action}")
+    if pu.waiting_on is not None:
+        lines.append(f"Wartet auf: {pu.waiting_on}")
+    if not lines:
+        lines.append("Projekt aktualisiert (keine weiteren Details).")
+    return "\n".join(lines)
+
+
+def _format_task_entry(et: ExtractedTask) -> str:
+    """Menschenlesbaren Log-Eintrag für eine neue projektbezogene Aufgabe formulieren."""
+    due = f" — fällig: {et.due}" if et.due else ""
+    return f"Neue Aufgabe: {et.title}{due}"
+
+
 def persist_result(
     result: ExtractionResult,
     indices: list[int] | None,
@@ -385,8 +407,9 @@ def persist_result(
             project.next_action = pu.next_action
         if pu.waiting_on is not None:
             project.waiting_on = pu.waiting_on
-        open_project_log(project, log_dir)
+        log = open_project_log(project, log_dir)
         repo.update_project(project)
+        log.append_entry(_format_project_update_entry(pu), source="Sprachnotiz")
         count += 1
 
     # 3. Tasks
@@ -399,9 +422,11 @@ def persist_result(
         project_id: int | None = None
         if et.project:
             p = repo.get_or_create_project(et.project, contact_id=contact_id)
-            if p.markdown_log_path is None:
-                open_project_log(p, log_dir)
+            had_log = p.markdown_log_path is not None
+            log = open_project_log(p, log_dir)
+            if not had_log:
                 repo.update_project(p)
+            log.append_entry(_format_task_entry(et), source="Sprachnotiz")
             project_id = p.id
         repo.create_task(
             Task(
