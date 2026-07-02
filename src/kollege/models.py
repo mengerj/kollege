@@ -112,6 +112,24 @@ class ExtractedCompletion(BaseModel):
     task_title: str
 
 
+class ExtractedTaskEdit(BaseModel):
+    """Eine erkannte Änderung an einer bestehenden **offenen Aufgabe** (Schritt 8.19).
+
+    Für den Fall, dass die Nutzerin eine bereits gespeicherte Aufgabe korrigieren
+    will („Aufgabe #6 heißt Bad Eibling, muss Bad Aibling sein"). ``task_id``/
+    ``task_title`` werden unverändert aus der dem Agenten mitgegebenen Liste offener
+    Aufgaben übernommen (wie ``ExtractedCompletion``) — kein Raten, keine neue
+    Aufgabe anlegen. Nur die gesetzten ``new_*``-Felder werden geändert; ``None``
+    bedeutet „unverändert lassen".
+    """
+
+    task_id: int
+    task_title: str
+    new_title: str | None = None
+    new_due: date | None = None
+    new_project: str | None = None
+
+
 class ExtractionResult(BaseModel):
     """Gebündeltes Ergebnis einer Extraktion aus einer Nachricht/Sprachnotiz.
 
@@ -123,10 +141,13 @@ class ExtractionResult(BaseModel):
     tasks: list[ExtractedTask] = Field(default_factory=list)
     project_updates: list[ExtractedProjectUpdate] = Field(default_factory=list)
     completed: list[ExtractedCompletion] = Field(default_factory=list)
+    edits: list[ExtractedTaskEdit] = Field(default_factory=list)
     clarification: str | None = None
 
     def is_empty(self) -> bool:
-        return not (self.contacts or self.tasks or self.project_updates or self.completed)
+        return not (
+            self.contacts or self.tasks or self.project_updates or self.completed or self.edits
+        )
 
 
 # --------------------------------------------------------------------------- #

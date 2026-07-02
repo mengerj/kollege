@@ -282,6 +282,59 @@ def test_mark_task_done_unknown_id_raises(repo: Repository) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# update_task — Aufgabe bearbeiten (Schritt 8.19)                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_update_task_changes_title(repo: Repository) -> None:
+    task = repo.create_task(Task(title="Bad Eibling begehen"))
+    assert task.id is not None
+
+    updated = repo.update_task(task.id, title="Bad Aibling begehen")
+
+    assert updated.title == "Bad Aibling begehen"
+    # Reload aus DB bestätigt Persistenz
+    assert repo.query_open_items()[0].title == "Bad Aibling begehen"
+
+
+def test_update_task_changes_due_and_project(repo: Repository) -> None:
+    project = repo.get_or_create_project("Gemeinde-Sache")
+    assert project.id is not None
+    task = repo.create_task(Task(title="Unterlagen prüfen"))
+    assert task.id is not None
+
+    updated = repo.update_task(task.id, due=date(2026, 7, 10), project_id=project.id)
+
+    assert updated.due == date(2026, 7, 10)
+    assert updated.project_id == project.id
+
+
+def test_update_task_none_fields_leave_values_unchanged(repo: Repository) -> None:
+    task = repo.create_task(Task(title="Ursprung", due=date(2026, 7, 1)))
+    assert task.id is not None
+
+    updated = repo.update_task(task.id, title="Neu")  # due bleibt unangetastet
+
+    assert updated.title == "Neu"
+    assert updated.due == date(2026, 7, 1)
+
+
+def test_update_task_unknown_id_raises(repo: Repository) -> None:
+    with pytest.raises(ValueError, match="nicht gefunden"):
+        repo.update_task(999, title="egal")
+
+
+def test_update_task_preserves_status(repo: Repository) -> None:
+    """Ein Titel-Edit ändert den Status nicht (bleibt offen)."""
+    task = repo.create_task(Task(title="Offen bleiben"))
+    assert task.id is not None
+
+    updated = repo.update_task(task.id, title="Immer noch offen")
+
+    assert updated.status is TaskStatus.OFFEN
+
+
+# --------------------------------------------------------------------------- #
 # Factory                                                                       #
 # --------------------------------------------------------------------------- #
 
