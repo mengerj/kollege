@@ -5,6 +5,46 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Planung: Nutzbarkeits-Block 8.14–8.17 (aus Live-Test)
+
+**Auslöser:** Live-Test mit `mistral3.1-medium` (via OpenRouter). Der Extraktions-
+kern trägt, aber für den Alltag fehlt Nutzbarkeit. Diese Session war reine
+**Planung + kritisches Feedback** (kein Code) — Ergebnis in ROADMAP als Block
+8.14–8.17 festgehalten, abzuarbeiten **vor** der E-Mail-Integration (Schritt 9).
+
+**Befunde aus dem Live-Log (korrigierte Diagnose):**
+- Eine Zitat-Korrektur *„…Telefonnummer einspeichern (wie in der letzten
+  Nachricht)"* wurde **korrekt** als `_revise` geroutet — meine erste Vermutung
+  („Freitext ohne Zitat wird nicht als Korrektur erkannt") war **falsch**. Die
+  echte Ursache: `run_revision`/`run_clarification_response` haben **kein
+  Gedächtnis über die Turns einer Interaktion** (nur Ursprungstranskript +
+  aktueller Vorschlag + ein Korrekturtext). Die referenzierte Nummer stand in einer
+  früheren Notiz → kein Referent → Kontakt kam ohne Nummer zurück. → **Schritt 8.14**.
+- `data/projects/kräutergarten-aibling-1.md` ist der Projekt-Markdown-Log, aber
+  `ProjectLog.append_entry()` wird **nirgends** aufgerufen — Logs bleiben leer
+  (nur Header). Feature ist halb verdrahtet. → **Schritt 8.16** (füllen, Prinzip 4).
+- Es fehlt jeder **Lesepfad** (offene/dringende Aufgaben, Kontakte, Projekte) und
+  jede Möglichkeit, Aufgaben zu **schließen** → offene Liste würde monoton wachsen.
+  → **Schritt 8.15** (deterministische deutsche Slash-Commands, kein LLM).
+
+**Entscheidungen der Nutzerin:**
+- Beim Modell bleiben: *neue Nachricht = neue Notiz*; Korrektur/Antwort **nur**
+  über die Zitat-Antwort-Funktion (kein Freitext-ohne-Zitat als Korrektur).
+- Gedächtnis (8.14): **vollständige Historie einer Interaktion** genügt, kein
+  senderweites Dauergedächtnis.
+- Erledigtes muss auch aus **Freitext** erkannt werden („Tagesrückblick") und gegen
+  offene Aufgaben abgeglichen werden → **Schritt 8.17**. Der Dispatcher routet das
+  als normale Notiz; die „getan vs. zu tun"-Logik sitzt in der Extraktion.
+  Erkennung + Abgleich in **einem** Lauf (Variante A).
+- Slash-Commands auf **Deutsch**.
+
+**Reihenfolge:** 8.14 → 8.15 → 8.16 → 8.17. Schritt 8.12 (EU-LLM-Anbieter) bleibt
+offen, aber hinter diesem Block zurückgestellt (OpenRouter reicht zum Testen).
+
+**Nächster Schritt:** 8.14 umsetzen (Details + DoD in [ROADMAP.md](ROADMAP.md)).
+
+---
+
 ## 2026-07-01 — Schritt 8.13 — Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung
 
 **Auslöser:** Live-Test. Der Bot stellte eine Rückfrage (*„Soll der Kontakt

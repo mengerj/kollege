@@ -12,23 +12,32 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden.**
+**Schritt 8.14 — Vollständige Historie pro Pending-Proposal.**
 
-Schritt 8.11 (Modell-Benchmark-System) ist abgeschlossen: `src/kollege/eval/`
-(Fixtures/Scoring/Runner), `scripts/benchmark_models.py`, `docs/benchmark.md`
-und eine erste Baseline (`ornith:9b` vs. `qwen2.5:7b-instruct`) in
-`benchmarks/results/` liegen vor. Details siehe Schritt 8.11 unten und
-[PROJECT_LOG.md](PROJECT_LOG.md).
+Aus einem Live-Test (mistral3.1-medium via OpenRouter) kam ein Bündel an
+Erkenntnissen; daraus ein priorisierter Block **8.14 → 8.15 → 8.16 → 8.17**,
+der vor der E-Mail-Integration (Schritt 9) abgearbeitet wird. Details je Schritt
+weiter unten; Herleitung siehe [PROJECT_LOG.md](PROJECT_LOG.md) (Eintrag 2026-07-02).
 
-Jetzt: Anbieter-Landschaft klären, 1–2 EU-/DSGVO-konforme Kandidaten wählen und
-in [`build_model()`](src/kollege/agent/__init__.py) anbinden — 8.11 liefert die
-Mess-Grundlage für die Auswahl. Details unten in Schritt 8.12.
+Jetzt konkret **Schritt 8.14**: Korrektur- und Rückfrage-Läufe scheitern an
+Referenzen wie *„…die Telefonnummer wie in der letzten Nachricht"*, weil
+[`run_revision`](src/kollege/agent/__init__.py) und
+[`run_clarification_response`](src/kollege/agent/__init__.py) **kein Gedächtnis
+über die Turns einer Interaktion** haben — sie sehen nur (Ursprungstranskript +
+aktueller Vorschlag + ein Korrekturtext). `PendingProposal`/`PendingClarification`
+bekommen eine `history` (alle Turns *einer* Interaktion), die den Läufen
+mitgegeben wird. Details unten in Schritt 8.14.
 
+> **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
+> Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
+> Deutsch. Bei 8.17 Erkennung+Abgleich in **einem** Extraktionslauf (Variante A).
+>
+> **Schritt 8.12 (EU-LLM-Anbieter)** bleibt offen, ist aber hinter den 8.14–8.17-
+> Block zurückgestellt: der Schreib-/Abfragepfad soll erst stabil sein. Für Tests
+> reicht vorerst OpenRouter.
+>
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
 > Schritt 8.5 (restliche Live-Edge-Cases) läuft parallel weiter.
->
-> Zwischendrin erledigt: **Schritt 8.13** (Rückfrage-Antwort-Schleife + robuste
-> 👍/👎-Erkennung) — aus einem Live-Test eingeschoben, siehe unten.
 
 ---
 
@@ -52,8 +61,12 @@ Mess-Grundlage für die Auswahl. Details unten in Schritt 8.12.
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
 | 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
-| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ▶ nächster Schritt |
+| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen (hinter 8.14–8.17 zurückgestellt) |
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
+| 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ▶ nächster Schritt |
+| 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ⬜ offen |
+| 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ⬜ offen |
+| 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -490,6 +503,114 @@ Tests in [`test_orchestrator.py`](tests/test_orchestrator.py) und
 
 **Bewusst nicht im Scope.** Zeitliches Ablaufen offener Rückfragen (TTL) und das
 Zusammenführen mehrerer offener Zustände pro Absender.
+
+---
+
+## Schritte 8.14–8.17 — Nutzbarkeits-Block aus Live-Test (mistral3.1-medium)
+
+*Priorisierter Block, abzuarbeiten **vor** der E-Mail-Integration (Schritt 9).
+Herleitung und Live-Log siehe [PROJECT_LOG.md](PROJECT_LOG.md), Eintrag
+2026-07-02. Jeder Schritt hält an den Designprinzipien fest: passive Erfassung,
+Human-in-the-loop (extrahieren → vorschlagen → bestätigen), lokal-first,
+Datensparsamkeit.*
+
+### Schritt 8.14 — Vollständige Historie pro Pending-Proposal ▶
+
+**Problem (aus Live-Test).** Die Nutzerin zitiert-antwortet auf einen Vorschlag
+mit *„Ich möchte zusätzlich seine Telefonnummer einspeichern (wie in der letzten
+Nachricht)"*. Die Korrektur wird korrekt als `_revise` geroutet, liefert aber den
+Kontakt **ohne** Nummer — weil die Nummer in einer *früheren* Notiz stand.
+[`run_revision`](src/kollege/agent/__init__.py) und
+[`run_clarification_response`](src/kollege/agent/__init__.py) bauen ihren Prompt
+nur aus (Ursprungstranskript + aktueller Vorschlag + ein Korrekturtext) — es gibt
+**kein Gedächtnis über die Turns einer Interaktion**. Referenzen wie „wie vorhin"
+laufen daher ins Leere.
+
+**Umsetzung.**
+- `PendingProposal` und `PendingClarification` (in
+  [`orchestrator.py`](src/kollege/orchestrator.py)) bekommen ein Feld `history`:
+  die geordnete Liste **aller Turns einer laufenden Interaktion** (Ausgangsnotiz →
+  Rückfrage → Antwort → Vorschlag → Korrektur → …). Wird beim Übergang
+  Rückfrage → Vorschlag mitgeführt.
+- `run_revision()`/`run_clarification_response()` bekommen die `history` statt nur
+  des letzten Transkripts und stellen sie dem Prompt voran.
+- **Scope-Grenze (Datensparsamkeit, Prinzip 5):** Historie ist an *eine*
+  Interaktion gebunden und wird bei Bestätigung/Ablehnung verworfen. **Kein**
+  senderweites Dauergedächtnis, **keine** Cross-Notiz-Referenzen — deckt sich mit
+  der bestätigten Regel „neue Nachricht = neue Notiz".
+
+**DoD.** Ein `FunctionModel`-Test zeigt: eine Korrektur, die auf einen in einem
+früheren Turn derselben Interaktion genannten Wert verweist, landet im Ergebnis.
+`ruff`/`mypy`/`pytest` grün. Kein echter LLM-Aufruf im CI.
+
+### Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands ⬜
+
+**Ziel.** Abfragen des DB-Standes über deterministische Kommandos — ohne LLM,
+nimmt dem Modell Entscheidungsdruck (lokal-first, schnell, zuverlässig).
+
+**Umsetzung.**
+- Repository ([`repository.py`](src/kollege/db/repository.py)), rein &
+  TDD-fähig: `query_open_tasks(sort_by_due=True)`, `list_contacts()`,
+  `list_projects()`, `mark_task_done(task_id)` (nutzt vorhandenes
+  `update_task_status`).
+- **Dispatcher** am Anfang von
+  [`handle_message`](src/kollege/orchestrator.py): feste Reihenfolge
+  `Command? → offener Vorschlag/Rückfrage? → sonst neue Notiz`. Ersetzt das
+  implizite „jeder Text ist eine Notiz".
+- Kommandos (deutsch, mit `/`): `/offen`, `/dringend` (überfällige zuerst:
+  `due <= heute`, dann nächste Fristen, ohne Datum ans Ende), `/kontakte`,
+  `/projekte`, `/erledigt <id>`, `/hilfe`.
+- Antworten knapp und mit IDs formatiert (IDs sind der Handle für `/erledigt`).
+
+**DoD.** Command-Routing + jede Query mit `MemoryChannel` getestet; `/erledigt <id>`
+schließt genau eine Aufgabe; unbekanntes/fehlerhaftes Kommando → freundlicher
+Hinweis + `/hilfe`. Kette grün.
+
+### Schritt 8.16 — Projekt-Markdown-Logs füllen ⬜
+
+**Problem.** [`open_project_log`](src/kollege/logs/__init__.py) legt die
+Log-Datei an (`data/projects/<slug>-<id>.md`), aber `ProjectLog.append_entry()`
+wird **nirgends** aufgerufen — die Logs enthalten nur den Header (daher die leere
+`kräutergarten-aibling-1.md`). Prinzip 4 („Notizbuch bleibt — ergänzen") ist damit
+nur halb verdrahtet.
+
+**Umsetzung.** In [`persist_result`](src/kollege/orchestrator.py) bei jeder
+bestätigten Projekt-Statusänderung / `phase_note` / projektbezogenen Aufgabe einen
+menschenlesbaren Eintrag via `append_entry` schreiben (Zeitstempel + Quelle +
+Was). Beantwortet endgültig „wann wird angelegt / was kommt rein".
+
+**DoD.** Nach Bestätigung eines projektbezogenen Vorschlags enthält der Log einen
+neuen datierten Eintrag; Test prüft Inhalt (nicht nur Existenz). Kette grün.
+
+### Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen ⬜
+
+**Ziel.** Beschreibt die Nutzerin im Freitext, was sie erledigt hat („Heute den
+Zaun bei Müller gestrichen und das Angebot an die Gemeinde rausgeschickt"), sollen
+die passenden **offenen Aufgaben** erkannt und — nach Bestätigung — geschlossen
+werden. Bleibt eine normale Notiz; der **Dispatcher** routet sie in die Extraktion.
+Die Intelligenz „getan vs. zu tun" sitzt in der Extraktion, nicht im Routing.
+
+**Umsetzung (Variante A — Erkennung + Abgleich in einem Lauf, bestätigt).**
+- `ExtractionResult` (in [`models.py`](src/kollege/models.py)) bekommt ein Feld
+  `completed` (erkannte Erledigungs-Aussagen inkl. optionaler Projekt-/
+  Kontakt-/ID-Zuordnung).
+- **Offene-Aufgaben-Kontext einspeisen**, analog zu
+  [`get_known_names_context`](src/kollege/agent/__init__.py): aktuell offene
+  Aufgaben (mit IDs) werden dem Transkript vorangestellt, damit der Lauf die
+  Erledigung einer bestehenden Aufgabe zuordnen kann.
+- Neuer **Eintragstyp im Bestätigungs-Loop** („Aufgabe #N schließen") in
+  `_result_items`/`format_proposal`/`persist_result`; Bestätigung →
+  `mark_task_done(id)` (aus 8.15).
+- **Vertrauensschutz (Prinzip 3):** nie automatisch schließen — immer über den
+  Vorschlag, mit ID + Titel sichtbar. Bei unsicherer/mehrdeutiger Zuordnung
+  **Rückfrage** statt raten (nutzt vorhandene `clarification`-Mechanik).
+
+**Abhängigkeit.** Baut auf 8.15 (`mark_task_done`, offene-Aufgaben-Query) auf →
+daher zuletzt.
+
+**DoD.** `FunctionModel`-Test: eine Erledigungs-Notiz mit passender offener Aufgabe
+erzeugt einen „schließen"-Vorschlag; Bestätigung setzt Status auf `erledigt`;
+ohne guten Treffer → Rückfrage statt falsches Schließen. Kette grün.
 
 ---
 
