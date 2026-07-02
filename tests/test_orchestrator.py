@@ -266,6 +266,52 @@ def test_persist_result_project_update_creates_log_file(repo: Repository, log_di
     assert len(log_files) == 1
 
 
+def test_persist_result_project_update_writes_log_entry(repo: Repository, log_dir: Path) -> None:
+    """Schritt 8.16: eine bestätigte Projektaktualisierung schreibt einen Log-Eintrag,
+    nicht nur die leere Log-Datei."""
+    result = ExtractionResult(
+        project_updates=[
+            ExtractedProjectUpdate(
+                project="Waldpark", status=ProjectStatus.UMSETZUNG, phase_note="Zaun gestrichen"
+            )
+        ]
+    )
+    persist_result(result, None, repo, log_dir)
+    log_file = next(log_dir.glob("*.md"))
+    content = log_file.read_text(encoding="utf-8")
+    assert "Status: umsetzung" in content
+    assert "Zaun gestrichen" in content
+    assert "Sprachnotiz" in content
+
+
+def test_persist_result_task_with_project_writes_log_entry(repo: Repository, log_dir: Path) -> None:
+    """Schritt 8.16: eine bestätigte projektbezogene Aufgabe schreibt einen Log-Eintrag."""
+    result = ExtractionResult(tasks=[ExtractedTask(title="Angebot erstellen", project="Stadtpark")])
+    persist_result(result, None, repo, log_dir)
+    log_file = next(log_dir.glob("*.md"))
+    content = log_file.read_text(encoding="utf-8")
+    assert "Neue Aufgabe: Angebot erstellen" in content
+
+
+def test_persist_result_appends_multiple_entries_to_same_log(
+    repo: Repository, log_dir: Path
+) -> None:
+    """Zwei bestätigte Änderungen zum selben Projekt ergeben zwei Log-Einträge, nicht ein
+    Überschreiben des ersten (append-only, Prinzip 4)."""
+    first = ExtractionResult(
+        project_updates=[ExtractedProjectUpdate(project="Waldpark", status=ProjectStatus.PLANUNG)]
+    )
+    persist_result(first, None, repo, log_dir)
+    second = ExtractionResult(tasks=[ExtractedTask(title="Zaun streichen", project="Waldpark")])
+    persist_result(second, None, repo, log_dir)
+
+    log_files = list(log_dir.glob("*.md"))
+    assert len(log_files) == 1
+    content = log_files[0].read_text(encoding="utf-8")
+    assert "Status: planung" in content
+    assert "Neue Aufgabe: Zaun streichen" in content
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator — normaler Ablauf
 # ---------------------------------------------------------------------------

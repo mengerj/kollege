@@ -5,6 +5,38 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Schritt 8.16 — Projekt-Markdown-Logs füllen (append_entry verdrahten)
+
+**Problem:** [`open_project_log`](src/kollege/logs/__init__.py) legte die Log-Datei
+zwar an (`data/projects/<slug>-<id>.md`), aber `ProjectLog.append_entry()` wurde
+nirgends aufgerufen — Logs enthielten nur den leeren Header. Prinzip 4
+(„Notizbuch bleibt — ergänzen") war damit nur halb verdrahtet.
+
+**Getan:**
+- [`persist_result`](src/kollege/orchestrator.py) schreibt jetzt bei jeder
+  bestätigten projektbezogenen Änderung einen datierten, menschenlesbaren Eintrag:
+  - **Projekt-Update:** neuer Status, `phase_note`, `next_action`, `waiting_on` —
+    jeweils als eigene Zeile, formatiert von der neuen Hilfsfunktion
+    `_format_project_update_entry`.
+  - **Projektbezogene Aufgabe:** `"Neue Aufgabe: <Titel> — fällig: <Datum>"`,
+    formatiert von `_format_task_entry`.
+  - Beide Fälle nutzen `open_project_log()` weiterhin nur zum Anlegen/Öffnen der
+    Datei (idempotent) und rufen anschließend `ProjectLog.append_entry(text,
+    source="Sprachnotiz")` auf. `repo.update_project()` bleibt wie zuvor nur nötig,
+    wenn der Log-Pfad neu am Projekt gesetzt wurde.
+- Kein neuer State, keine Schema-Änderung — reine Verdrahtung eines bereits
+  vorhandenen Bausteins (`ProjectLog.append_entry` existierte seit Schritt 3).
+
+**Tests:** drei neue Tests in [`test_orchestrator.py`](tests/test_orchestrator.py)
+prüfen **Inhalt** (nicht nur Existenz) des Log-Eintrags: Projekt-Update-Text,
+Aufgaben-Text, sowie dass zwei aufeinanderfolgende bestätigte Änderungen zum
+selben Projekt **beide** Einträge im Log stehen (append-only, kein Überschreiben).
+Gesamt grün: 252 passed (1 deselected: `eval`-Marker, real-LLM). Ruff + mypy sauber.
+
+**Nächster Schritt:** **8.17** — Erledigungen aus Freitext erkennen & abgleichen.
+
+---
+
 ## 2026-07-02 — Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands
 
 **Ziel:** DB-Stand deterministisch abfragen können — ohne LLM, schnell, zuverlässig

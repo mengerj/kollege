@@ -12,25 +12,22 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.16 — Projekt-Markdown-Logs füllen (append_entry verdrahten).**
+**Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen.**
 
 Teil des priorisierten Blocks **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
 (mistral3.1-medium via OpenRouter), der vor der E-Mail-Integration (Schritt 9)
 abgearbeitet wird. Details je Schritt weiter unten; Herleitung siehe
 [PROJECT_LOG.md](PROJECT_LOG.md) (Einträge 2026-07-02).
 
-**Schritt 8.15 ist erledigt:** [`repository.py`](src/kollege/db/repository.py) hat
-jetzt `query_open_tasks(sort_by_due=True)`, `list_contacts()`, `list_projects()` und
-`mark_task_done(task_id)`; [`orchestrator.py`](src/kollege/orchestrator.py) hat einen
-festen Dispatcher (`Reaktion? → Slash-Command? → offener Vorschlag/Rückfrage? →
-sonst neue Notiz`) und die deutschen Kommandos `/offen`, `/dringend`, `/kontakte`,
-`/projekte`, `/erledigt <id>`, `/hilfe`.
+**Schritt 8.16 ist erledigt:** [`persist_result`](src/kollege/orchestrator.py)
+schreibt bei jeder bestätigten projektbezogenen Änderung (Projekt-Update oder
+projektbezogene Aufgabe) einen datierten, menschenlesbaren Eintrag über
+`ProjectLog.append_entry()` — Projekt-Logs bleiben nicht mehr leer.
 
-Jetzt konkret **Schritt 8.16**: [`open_project_log`](src/kollege/logs/__init__.py)
-legt die Log-Datei nur an, `ProjectLog.append_entry()` wird nirgends aufgerufen —
-bei jeder bestätigten projektbezogenen Änderung soll
-[`persist_result`](src/kollege/orchestrator.py) einen datierten Eintrag schreiben.
-Details/DoD unten in Schritt 8.16.
+Jetzt konkret **Schritt 8.17**: Beschreibt die Nutzerin im Freitext, was sie
+erledigt hat, sollen passende **offene Aufgaben** erkannt und — nach Bestätigung —
+über `mark_task_done` (aus 8.15) geschlossen werden. Details/DoD unten in
+Schritt 8.17.
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -69,8 +66,8 @@ Details/DoD unten in Schritt 8.16.
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
 | 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ✅ erledigt |
 | 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ✅ erledigt |
-| 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ▶ nächster Schritt |
-| 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ⬜ offen |
+| 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ✅ erledigt |
+| 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ▶ nächster Schritt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -577,21 +574,27 @@ Hinweis + `/hilfe`. Ein Kommando hat Vorrang vor einem offenen Vorschlag/einer
 offenen Rückfrage und lässt diese unangetastet (reiner Seitenkanal). 249 Tests
 grün, `ruff`/`mypy` sauber.
 
-### Schritt 8.16 — Projekt-Markdown-Logs füllen ⬜
+### Schritt 8.16 — Projekt-Markdown-Logs füllen ✅
 
 **Problem.** [`open_project_log`](src/kollege/logs/__init__.py) legt die
 Log-Datei an (`data/projects/<slug>-<id>.md`), aber `ProjectLog.append_entry()`
-wird **nirgends** aufgerufen — die Logs enthalten nur den Header (daher die leere
-`kräutergarten-aibling-1.md`). Prinzip 4 („Notizbuch bleibt — ergänzen") ist damit
+wurde **nirgends** aufgerufen — die Logs enthielten nur den Header (daher die leere
+`kräutergarten-aibling-1.md`). Prinzip 4 („Notizbuch bleibt — ergänzen") war damit
 nur halb verdrahtet.
 
-**Umsetzung.** In [`persist_result`](src/kollege/orchestrator.py) bei jeder
-bestätigten Projekt-Statusänderung / `phase_note` / projektbezogenen Aufgabe einen
-menschenlesbaren Eintrag via `append_entry` schreiben (Zeitstempel + Quelle +
-Was). Beantwortet endgültig „wann wird angelegt / was kommt rein".
+**Umsetzung.** [`persist_result`](src/kollege/orchestrator.py) schreibt bei jeder
+bestätigten Projekt-Statusänderung / `phase_note` / `next_action` / `waiting_on`
+sowie bei jeder projektbezogenen Aufgabe einen menschenlesbaren, datierten Eintrag
+via `ProjectLog.append_entry(text, source="Sprachnotiz")` — Hilfsfunktionen
+`_format_project_update_entry` / `_format_task_entry` formatieren den Text.
+`open_project_log()` bleibt reine Anlage/Öffnung (idempotent); `repo.update_project()`
+läuft weiterhin nur, wenn der Log-Pfad neu gesetzt wurde.
 
-**DoD.** Nach Bestätigung eines projektbezogenen Vorschlags enthält der Log einen
-neuen datierten Eintrag; Test prüft Inhalt (nicht nur Existenz). Kette grün.
+**DoD.** ✅ Nach Bestätigung eines projektbezogenen Vorschlags enthält der Log einen
+neuen datierten Eintrag; drei Tests in
+[`test_orchestrator.py`](tests/test_orchestrator.py) prüfen Inhalt (nicht nur
+Existenz) inkl. append-only bei zwei aufeinanderfolgenden Änderungen. 252 Tests
+grün, `ruff`/`mypy` sauber.
 
 ### Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen ⬜
 
