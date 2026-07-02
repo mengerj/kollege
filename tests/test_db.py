@@ -220,6 +220,67 @@ def test_query_waiting_on_empty_when_no_match(repo: Repository) -> None:
     assert repo.query_waiting_on(WaitingOn.DIENSTLEISTER) == []
 
 
+def test_query_open_tasks_sort_by_due_overdue_first_no_date_last(repo: Repository) -> None:
+    ohne_datum = repo.create_task(Task(title="Ohne Datum"))
+    spaeter = repo.create_task(Task(title="Später", due=date(2026, 12, 1)))
+    ueberfaellig = repo.create_task(Task(title="Überfällig", due=date(2026, 1, 1)))
+    bald = repo.create_task(Task(title="Bald", due=date(2026, 7, 5)))
+
+    result = repo.query_open_tasks(sort_by_due=True)
+
+    assert [t.id for t in result] == [ueberfaellig.id, bald.id, spaeter.id, ohne_datum.id]
+
+
+def test_query_open_tasks_sort_by_due_false_returns_insertion_order(repo: Repository) -> None:
+    first = repo.create_task(Task(title="Zuerst", due=date(2026, 12, 1)))
+    second = repo.create_task(Task(title="Danach", due=date(2026, 1, 1)))
+
+    result = repo.query_open_tasks(sort_by_due=False)
+
+    assert [t.id for t in result] == [first.id, second.id]
+
+
+def test_query_open_tasks_excludes_closed(repo: Repository) -> None:
+    closed = repo.create_task(Task(title="Erledigt"))
+    assert closed.id is not None
+    repo.mark_task_done(closed.id)
+    repo.create_task(Task(title="Offen"))
+
+    assert len(repo.query_open_tasks()) == 1
+
+
+def test_list_contacts_sorted_alphabetically(repo: Repository) -> None:
+    repo.upsert_contact(ExtractedContact(name="Zimmermann"))
+    repo.upsert_contact(ExtractedContact(name="Anders"))
+    repo.upsert_contact(ExtractedContact(name="Müller"))
+
+    names = [c.name for c in repo.list_contacts()]
+    assert names == ["Anders", "Müller", "Zimmermann"]
+
+
+def test_list_projects_sorted_alphabetically(repo: Repository) -> None:
+    repo.get_or_create_project("Zaunbau")
+    repo.get_or_create_project("Aibling")
+
+    titles = [p.title for p in repo.list_projects()]
+    assert titles == ["Aibling", "Zaunbau"]
+
+
+def test_mark_task_done_sets_status(repo: Repository) -> None:
+    task = repo.create_task(Task(title="Zaun streichen"))
+    assert task.id is not None
+
+    done = repo.mark_task_done(task.id)
+
+    assert done.status is TaskStatus.ERLEDIGT
+    assert repo.query_open_items() == []
+
+
+def test_mark_task_done_unknown_id_raises(repo: Repository) -> None:
+    with pytest.raises(ValueError, match="nicht gefunden"):
+        repo.mark_task_done(999)
+
+
 # --------------------------------------------------------------------------- #
 # Factory                                                                       #
 # --------------------------------------------------------------------------- #

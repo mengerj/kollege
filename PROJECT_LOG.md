@@ -5,6 +5,41 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands
+
+**Ziel:** DB-Stand deterministisch abfragen können — ohne LLM, schnell, zuverlässig
+(nimmt dem Modell Entscheidungsdruck, siehe Planungs-Eintrag 8.14–8.17 weiter unten).
+
+**Getan:**
+- [`repository.py`](src/kollege/db/repository.py): `query_open_tasks(sort_by_due=True)`
+  (überfällige/nächste Fristen zuerst, kein Datum ans Ende; `sort_by_due=False` =
+  Einfügereihenfolge für `/offen`), `list_contacts()`/`list_projects()` (alphabetisch
+  sortiert — bewusst getrennt von `get_all_contacts()`/`get_all_projects()`, die
+  weiterhin unsortiert für die interne Tool-Only-Rekonstruktion dienen), und
+  `mark_task_done(task_id)` als dünner Wrapper um `update_task_status`.
+- [`orchestrator.py`](src/kollege/orchestrator.py): fester **Dispatcher** am Anfang von
+  `handle_message` — `Reaktion? → Slash-Command? → offener Vorschlag/Rückfrage? →
+  sonst neue Notiz`. Ein Kommando wird **immer sofort** ausgeführt und lässt einen
+  etwaig offenen Vorschlag/eine offene Rückfrage unangetastet (reiner Seitenkanal,
+  keine Interferenz mit dem Bestätigungs-Loop).
+- Kommandos: `/offen`, `/dringend`, `/kontakte`, `/projekte`, `/erledigt <id>`,
+  `/hilfe`. Antworten als knappe ID-beschriftete Listen (`format_open_tasks`,
+  `format_contacts`, `format_projects`) — IDs sind der Handle für `/erledigt`.
+  Unbekanntes Kommando und `/erledigt` ohne/mit ungültiger ID → freundlicher
+  Hinweis + Kommandoübersicht statt Absturz oder stiller Ignoranz.
+
+**Tests:** 21 neue Tests in [`test_db.py`](tests/test_db.py) (Sortierlogik,
+alphabetische Listen, `mark_task_done` inkl. unbekannter ID) und
+[`test_orchestrator.py`](tests/test_orchestrator.py) (jedes Kommando einzeln,
+Groß-/Kleinschreibung, Priorität vor offenem Vorschlag/offener Rückfrage,
+Regression „normale Notiz ohne Slash bleibt Extraktion"). Gesamt grün:
+249 passed (1 deselected: `eval`-Marker, real-LLM). Ruff + mypy sauber.
+
+**Nächster Schritt:** **8.16** — Projekt-Markdown-Logs füllen (`append_entry`
+verdrahten).
+
+---
+
 ## 2026-07-02 — Schritt 8.14 — Vollständige Historie pro Pending-Proposal
 
 **Auslöser:** siehe Planungs-Eintrag weiter unten (selber Tag). Der Live-Fall: eine

@@ -21,6 +21,12 @@ führen ein ``history``-Feld: alle vorangegangenen Turns derselben Interaktion
 Nachricht« über mehrere Runden hinweg auflösbar bleiben (Schritt 8.14). Die
 Historie ist strikt an eine laufende Interaktion gebunden und wird bei
 Bestätigung/Ablehnung verworfen — kein senderweites Dauergedächtnis.
+
+Dispatcher-Reihenfolge in ``handle_message`` (Schritt 8.15): Slash-Command? →
+offener Vorschlag/Rückfrage? → sonst neue Notiz. Deutsche Kommandos
+(``/offen``, ``/dringend``, ``/kontakte``, ``/projekte``, ``/erledigt <id>``,
+``/hilfe``) fragen den DB-Stand deterministisch ab — ohne LLM, unabhängig von
+einem etwaig offenen Vorschlag/einer Rückfrage.
 """
 
 from __future__ import annotations
@@ -45,10 +51,12 @@ from kollege.config import Settings
 from kollege.db import Repository
 from kollege.logs import open_project_log
 from kollege.models import (
+    Contact,
     ExtractedContact,
     ExtractedProjectUpdate,
     ExtractedTask,
     ExtractionResult,
+    Project,
     Task,
     TaskSource,
     TaskStatus,
@@ -60,6 +68,9 @@ __all__ = [
     "PendingClarification",
     "PendingProposal",
     "dedupe_result",
+    "format_contacts",
+    "format_open_tasks",
+    "format_projects",
     "format_proposal",
     "persist_result",
 ]
@@ -109,6 +120,67 @@ def _is_negative_reaction(emoji: str | None) -> bool:
     if not emoji:
         return False
     return _emoji_base(emoji) in _NEGATIVE_EMOJIS
+
+
+# ---------------------------------------------------------------------------
+# Slash-Commands (deutsch) — deterministische DB-Abfragen ohne LLM (Schritt 8.15)
+# ---------------------------------------------------------------------------
+
+_COMMAND = re.compile(r"^/(?P<cmd>\S+)\s*(?P<args>.*)$", re.DOTALL)
+
+_HELP_TEXT = (
+    "Verfügbare Kommandos:\n"
+    "/offen — offene Aufgaben\n"
+    "/dringend — offene Aufgaben, überfällige zuerst\n"
+    "/kontakte — alle Kontakte\n"
+    "/projekte — alle Projekte\n"
+    '/erledigt <id> — Aufgabe als erledigt markieren (z.B. "/erledigt 3")\n'
+    "/hilfe — diese Übersicht"
+)
+
+
+def _parse_command(text: str) -> tuple[str, str] | None:
+    """Text als Slash-Command parsen: (Kommando ohne "/", kleingeschrieben; Argumente).
+
+    ``None``, wenn der Text nicht mit "/" beginnt (dann ist es eine normale Notiz).
+    """
+    stripped = text.strip()
+    if not stripped.startswith("/"):
+        return None
+    match = _COMMAND.match(stripped)
+    if match is None:
+        return None
+    return match.group("cmd").lower(), match.group("args").strip()
+
+
+def format_open_tasks(tasks: list[Task]) -> str:
+    """Offene Aufgaben als knappe, ID-beschriftete Liste — für ``/offen``/``/dringend``."""
+    if not tasks:
+        return "Keine offenen Aufgaben."
+    lines = []
+    for t in tasks:
+        due = f", fällig: {t.due}" if t.due else ""
+        lines.append(f"#{t.id} {t.title}{due}")
+    return "\n".join(lines)
+
+
+def format_contacts(contacts: list[Contact]) -> str:
+    """Kontakte als knappe, ID-beschriftete Liste — für ``/kontakte``."""
+    if not contacts:
+        return "Keine Kontakte gespeichert."
+    lines = []
+    for c in contacts:
+        typ = f" ({c.type})" if c.type else ""
+        lines.append(f"#{c.id} {c.name}{typ}")
+    return "\n".join(lines)
+
+
+def format_projects(projects: list[Project]) -> str:
+    """Projekte als knappe, ID-beschriftete Liste — für ``/projekte``."""
+    if not projects:
+        return "Keine Projekte gespeichert."
+    lines = [f"#{p.id} {p.title} [{p.status}]" for p in projects]
+    return "\n".join(lines)
 
 
 # Anzahl Versuche und Standard-Wartezeit (Sekunden) bei transienten Extraktionsfehlern.
@@ -400,6 +472,16 @@ class Orchestrator:
             self._handle_reaction(msg)
             return
 
+        # Slash-Command (deutsch, z. B. "/offen")? Hat Vorrang vor einem offenen
+        # Vorschlag/einer Rückfrage — deterministische DB-Abfrage ohne LLM, lässt
+        # einen etwaig offenen Zustand unangetastet (Schritt 8.15).
+        if msg.text:
+            parsed = _parse_command(msg.text)
+            if parsed is not None:
+                cmd, cmd_args = parsed
+                self._handle_command(msg.sender, cmd, cmd_args)
+                return
+
         # Ist dies eine Antwort auf einen ausstehenden Vorschlag?
         if msg.sender in self._pending and msg.text:
             text = msg.text.strip()
@@ -543,6 +625,41 @@ class Orchestrator:
                 logger.info("Reaktion 👎 ignoriert (kein offener Vorschlag / keine Rückfrage)")
             return
         logger.info("Reaktion ignoriert (neutrales Emoji)")
+
+    def _handle_command(self, sender: str, cmd: str, args: str) -> None:
+        """Deterministisches Slash-Command auswerten und Antwort senden (Schritt 8.15)."""
+        logger.info("Kommando von %s: /%s %s", sender, cmd, args)
+        if cmd == "offen":
+            tasks = self._repo.query_open_tasks(sort_by_due=False)
+            self._channel.send(sender, format_open_tasks(tasks))
+        elif cmd == "dringend":
+            tasks = self._repo.query_open_tasks(sort_by_due=True)
+            self._channel.send(sender, format_open_tasks(tasks))
+        elif cmd == "kontakte":
+            self._channel.send(sender, format_contacts(self._repo.list_contacts()))
+        elif cmd == "projekte":
+            self._channel.send(sender, format_projects(self._repo.list_projects()))
+        elif cmd == "erledigt":
+            self._handle_erledigt(sender, args)
+        elif cmd == "hilfe":
+            self._channel.send(sender, _HELP_TEXT)
+        else:
+            self._channel.send(sender, f'Unbekanntes Kommando "/{cmd}".\n\n{_HELP_TEXT}')
+
+    def _handle_erledigt(self, sender: str, args: str) -> None:
+        """ "/erledigt <id>": genau eine Aufgabe als erledigt markieren."""
+        if not re.fullmatch(r"\d+", args):
+            self._channel.send(
+                sender, 'Bitte eine Aufgaben-ID angeben, z.B. "/erledigt 3".\n\n' + _HELP_TEXT
+            )
+            return
+        task_id = int(args)
+        try:
+            task = self._repo.mark_task_done(task_id)
+        except ValueError:
+            self._channel.send(sender, f"Keine offene Aufgabe mit ID {task_id} gefunden.")
+            return
+        self._channel.send(sender, f'✅ Aufgabe #{task.id} "{task.title}" erledigt.')
 
     def _get_transcript(self, msg: IncomingMessage) -> str | None:
         """Text aus Nachricht holen: direkt oder via Transcriber (für Audio)."""
