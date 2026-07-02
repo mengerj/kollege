@@ -330,6 +330,19 @@ class Repository:
         ).fetchall()
         return [self._row_to_task(r) for r in rows]
 
+    def query_open_tasks(self, sort_by_due: bool = True) -> list[Task]:
+        """Offene Aufgaben — für die Slash-Commands ``/offen`` und ``/dringend``.
+
+        ``sort_by_due=True`` (``/dringend``): aufsteigend nach Frist, d. h.
+        überfällige (``due <= heute``) zuerst, dann die nächsten Fristen,
+        Aufgaben ohne Datum ans Ende. ``sort_by_due=False`` (``/offen``):
+        Einfügereihenfolge.
+        """
+        tasks = self.query_open_items()
+        if not sort_by_due:
+            return tasks
+        return sorted(tasks, key=lambda t: (t.due is None, t.due))
+
     @_synchronized
     def get_all_contacts(self) -> list[Contact]:
         """Alle Kontakte – für die Rekonstruktion nach Tool-Only-Läufen."""
@@ -341,6 +354,25 @@ class Repository:
         """Alle Projekte – für die Rekonstruktion nach Tool-Only-Läufen."""
         rows = self._conn.execute("SELECT * FROM projects").fetchall()
         return [self._row_to_project(r) for r in rows]
+
+    @_synchronized
+    def list_contacts(self) -> list[Contact]:
+        """Alle Kontakte, alphabetisch sortiert — für das Kommando ``/kontakte``."""
+        rows = self._conn.execute("SELECT * FROM contacts ORDER BY name COLLATE NOCASE").fetchall()
+        return [self._row_to_contact(r) for r in rows]
+
+    @_synchronized
+    def list_projects(self) -> list[Project]:
+        """Alle Projekte, alphabetisch sortiert — für das Kommando ``/projekte``."""
+        rows = self._conn.execute("SELECT * FROM projects ORDER BY title COLLATE NOCASE").fetchall()
+        return [self._row_to_project(r) for r in rows]
+
+    def mark_task_done(self, task_id: int) -> Task:
+        """Task als erledigt markieren — für das Kommando ``/erledigt <id>``.
+
+        Nutzt ``update_task_status``; wirft ``ValueError`` bei unbekannter ID.
+        """
+        return self.update_task_status(task_id, TaskStatus.ERLEDIGT)
 
     @_synchronized
     def query_waiting_on(self, waiting_on: WaitingOn) -> list[Project]:

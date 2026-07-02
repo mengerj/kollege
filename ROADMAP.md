@@ -12,23 +12,25 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands.**
+**Schritt 8.16 — Projekt-Markdown-Logs füllen (append_entry verdrahten).**
 
 Teil des priorisierten Blocks **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
 (mistral3.1-medium via OpenRouter), der vor der E-Mail-Integration (Schritt 9)
 abgearbeitet wird. Details je Schritt weiter unten; Herleitung siehe
 [PROJECT_LOG.md](PROJECT_LOG.md) (Einträge 2026-07-02).
 
-**Schritt 8.14 ist erledigt:** `PendingProposal`/`PendingClarification` führen jetzt
-eine `history` (alle Turns einer laufenden Interaktion), die an
-[`run_revision`](src/kollege/agent/__init__.py) und
-[`run_clarification_response`](src/kollege/agent/__init__.py) durchgereicht wird —
-Referenzen wie *„…wie in der letzten Nachricht"* über mehrere Korrektur-/Rückfrage-
-Runden hinweg sind damit auflösbar.
+**Schritt 8.15 ist erledigt:** [`repository.py`](src/kollege/db/repository.py) hat
+jetzt `query_open_tasks(sort_by_due=True)`, `list_contacts()`, `list_projects()` und
+`mark_task_done(task_id)`; [`orchestrator.py`](src/kollege/orchestrator.py) hat einen
+festen Dispatcher (`Reaktion? → Slash-Command? → offener Vorschlag/Rückfrage? →
+sonst neue Notiz`) und die deutschen Kommandos `/offen`, `/dringend`, `/kontakte`,
+`/projekte`, `/erledigt <id>`, `/hilfe`.
 
-Jetzt konkret **Schritt 8.15**: Abfragen des DB-Standes über deterministische
-Kommandos (`/offen`, `/dringend`, `/kontakte`, `/projekte`, `/erledigt <id>`,
-`/hilfe`) — ohne LLM, schnell, zuverlässig. Details/DoD unten in Schritt 8.15.
+Jetzt konkret **Schritt 8.16**: [`open_project_log`](src/kollege/logs/__init__.py)
+legt die Log-Datei nur an, `ProjectLog.append_entry()` wird nirgends aufgerufen —
+bei jeder bestätigten projektbezogenen Änderung soll
+[`persist_result`](src/kollege/orchestrator.py) einen datierten Eintrag schreiben.
+Details/DoD unten in Schritt 8.16.
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -66,8 +68,8 @@ Kommandos (`/offen`, `/dringend`, `/kontakte`, `/projekte`, `/erledigt <id>`,
 | 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen (hinter 8.14–8.17 zurückgestellt) |
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
 | 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ✅ erledigt |
-| 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ▶ nächster Schritt |
-| 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ⬜ offen |
+| 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ✅ erledigt |
+| 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ▶ nächster Schritt |
 | 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -550,7 +552,7 @@ angehängt (statt `original_transcript`/`correction`/`answer` zu ersetzen) und w
 in `_revise()`/`_answer_clarification()` bei jedem Übergang fortgeschrieben.
 `ruff`/`mypy`/`pytest` grün (224 Tests), kein echter LLM-Aufruf im CI.
 
-### Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands ⬜
+### Schritt 8.15 — Query-Funktionen + deutsche Slash-Commands ✅
 
 **Ziel.** Abfragen des DB-Standes über deterministische Kommandos — ohne LLM,
 nimmt dem Modell Entscheidungsdruck (lokal-first, schnell, zuverlässig).
@@ -569,9 +571,11 @@ nimmt dem Modell Entscheidungsdruck (lokal-first, schnell, zuverlässig).
   `/projekte`, `/erledigt <id>`, `/hilfe`.
 - Antworten knapp und mit IDs formatiert (IDs sind der Handle für `/erledigt`).
 
-**DoD.** Command-Routing + jede Query mit `MemoryChannel` getestet; `/erledigt <id>`
+**DoD.** ✅ Command-Routing + jede Query mit `MemoryChannel` getestet; `/erledigt <id>`
 schließt genau eine Aufgabe; unbekanntes/fehlerhaftes Kommando → freundlicher
-Hinweis + `/hilfe`. Kette grün.
+Hinweis + `/hilfe`. Ein Kommando hat Vorrang vor einem offenen Vorschlag/einer
+offenen Rückfrage und lässt diese unangetastet (reiner Seitenkanal). 249 Tests
+grün, `ruff`/`mypy` sauber.
 
 ### Schritt 8.16 — Projekt-Markdown-Logs füllen ⬜
 

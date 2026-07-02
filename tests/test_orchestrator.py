@@ -25,10 +25,15 @@ from kollege.models import (
     ExtractedTask,
     ExtractionResult,
     ProjectStatus,
+    Task,
+    TaskStatus,
 )
 from kollege.orchestrator import (
     Orchestrator,
     dedupe_result,
+    format_contacts,
+    format_open_tasks,
+    format_projects,
     format_proposal,
     persist_result,
 )
@@ -696,7 +701,7 @@ def test_handle_message_dedups_overextracted_tasks(
 
 
 def test_update_task_status(repo: Repository) -> None:
-    from kollege.models import Task, TaskSource, TaskStatus
+    from kollege.models import TaskSource
 
     task = repo.create_task(
         Task(title="Testaufgabe", status=TaskStatus.OFFEN, source=TaskSource.MANUELL)
@@ -707,8 +712,6 @@ def test_update_task_status(repo: Repository) -> None:
 
 
 def test_update_task_status_unknown_id_raises(repo: Repository) -> None:
-    from kollege.models import TaskStatus
-
     with pytest.raises(ValueError, match="999"):
         repo.update_task_status(999, TaskStatus.ERLEDIGT)
 
@@ -1033,3 +1036,156 @@ def test_revision_after_resolved_clarification_carries_qa_history(
         ("Rückfrage", "Welches Projekt meinst du?"),
         ("Antwort", "Ja, als Dienstleister"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Deutsche Slash-Commands (Schritt 8.15) — deterministische DB-Abfragen ohne LLM
+# ---------------------------------------------------------------------------
+
+
+def test_format_open_tasks_empty() -> None:
+    assert format_open_tasks([]) == "Keine offenen Aufgaben."
+
+
+def test_format_open_tasks_shows_id_title_due() -> None:
+    text = format_open_tasks([Task(id=3, title="Zaun streichen", due=datetime.date(2026, 7, 5))])
+    assert text == "#3 Zaun streichen, fällig: 2026-07-05"
+
+
+def test_format_contacts_empty() -> None:
+    assert format_contacts([]) == "Keine Kontakte gespeichert."
+
+
+def test_format_projects_empty() -> None:
+    assert format_projects([]) == "Keine Projekte gespeichert."
+
+
+def test_command_offen_lists_open_tasks(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.create_task(Task(title="Rasen mähen"))
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/offen"))
+    assert len(channel.sent) == 1
+    assert "Rasen mähen" in channel.sent[0][1]
+
+
+def test_command_offen_no_tasks(orc: Orchestrator, channel: MemoryChannel) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/offen"))
+    assert channel.sent[0][1] == "Keine offenen Aufgaben."
+
+
+def test_command_dringend_sorts_overdue_first(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.create_task(Task(title="Ohne Datum"))
+    repo.create_task(Task(title="Später", due=datetime.date(2026, 12, 1)))
+    repo.create_task(Task(title="Überfällig", due=datetime.date(2026, 1, 1)))
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/dringend"))
+
+    text = channel.sent[0][1]
+    assert text.index("Überfällig") < text.index("Später") < text.index("Ohne Datum")
+
+
+def test_command_kontakte_lists_contacts(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/kontakte"))
+    assert "Familie Müller" in channel.sent[0][1]
+
+
+def test_command_projekte_lists_projects(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.get_or_create_project("Kräutergarten Aibling")
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/projekte"))
+    assert "Kräutergarten Aibling" in channel.sent[0][1]
+
+
+def test_command_erledigt_closes_exactly_one_task(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    t1 = repo.create_task(Task(title="Aufgabe 1"))
+    t2 = repo.create_task(Task(title="Aufgabe 2"))
+    assert t1.id is not None
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/erledigt {t1.id}"))
+
+    assert "erledigt" in channel.sent[0][1].lower()
+    open_tasks = repo.query_open_items()
+    assert len(open_tasks) == 1
+    assert open_tasks[0].id == t2.id
+
+
+def test_command_erledigt_unknown_id_gives_friendly_message(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/erledigt 999"))
+    assert "999" in channel.sent[0][1]
+    assert "gefunden" in channel.sent[0][1].lower()
+
+
+def test_command_erledigt_without_id_shows_usage_hint(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/erledigt"))
+    assert "id" in channel.sent[0][1].lower()
+
+
+def test_command_hilfe_lists_all_commands(orc: Orchestrator, channel: MemoryChannel) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/hilfe"))
+    text = channel.sent[0][1]
+    for cmd in ("/offen", "/dringend", "/kontakte", "/projekte", "/erledigt", "/hilfe"):
+        assert cmd in text
+
+
+def test_unknown_command_gives_friendly_hint_and_help(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/foobar"))
+    text = channel.sent[0][1]
+    assert "/foobar" in text
+    assert "/hilfe" in text
+
+
+def test_command_is_case_insensitive(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/OFFEN"))
+    assert channel.sent[0][1] == "Keine offenen Aufgaben."
+
+
+def test_command_takes_priority_over_open_proposal(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Ein Kommando wird sofort ausgeführt, ohne den offenen Vorschlag zu berühren."""
+    _prime_pending(orc, channel)
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/offen"))
+
+    assert channel.sent[0][1] == "Keine offenen Aufgaben."
+    assert SENDER in orc._pending  # Vorschlag bleibt unangetastet
+
+
+def test_command_takes_priority_over_open_clarification(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Ein Kommando wird auch bei offener Rückfrage sofort ausgeführt."""
+    _prime_clarification(orc, channel)
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/hilfe"))
+
+    assert "/hilfe" in channel.sent[0][1]
+    assert SENDER in orc._pending_clarifications  # Rückfrage bleibt unangetastet
+
+
+def test_plain_text_starting_without_slash_is_not_a_command(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    """Regressionstest: normale Notizen laufen weiterhin über die Extraktion."""
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
+    assert SENDER in orc._pending
