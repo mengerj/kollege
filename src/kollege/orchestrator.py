@@ -42,6 +42,7 @@ from pathlib import Path
 
 from kollege.agent import (
     get_known_names_context,
+    get_open_tasks_context,
     run_clarification_response,
     run_extraction,
     run_revision,
@@ -52,6 +53,7 @@ from kollege.db import Repository
 from kollege.logs import open_project_log
 from kollege.models import (
     Contact,
+    ExtractedCompletion,
     ExtractedContact,
     ExtractedProjectUpdate,
     ExtractedTask,
@@ -81,7 +83,7 @@ logger = logging.getLogger("kollege.orchestrator")
 # Typalias für die drei möglichen Extraktionsobjekte
 # ---------------------------------------------------------------------------
 
-_Item = ExtractedContact | ExtractedTask | ExtractedProjectUpdate
+_Item = ExtractedContact | ExtractedTask | ExtractedProjectUpdate | ExtractedCompletion
 
 # ---------------------------------------------------------------------------
 # Regex für Nutzereingaben im Bestätigungs-Dialog
@@ -262,6 +264,8 @@ def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
     for pu in result.project_updates:
         status_str = f" → {pu.status}" if pu.status else ""
         items.append((f"📁 Projekt: {pu.project}{status_str}", pu))
+    for comp in result.completed:
+        items.append((f"✅ Aufgabe schließen: #{comp.task_id} {comp.task_title}", comp))
     return items
 
 
@@ -312,10 +316,18 @@ def dedupe_result(result: ExtractionResult) -> ExtractionResult:
             seen_updates.add(ukey)
             updates.append(pu)
 
+    seen_completions: set[int] = set()
+    completions: list[ExtractedCompletion] = []
+    for comp in result.completed:
+        if comp.task_id not in seen_completions:
+            seen_completions.add(comp.task_id)
+            completions.append(comp)
+
     return ExtractionResult(
         contacts=contacts,
         tasks=tasks,
         project_updates=updates,
+        completed=completions,
         clarification=result.clarification,
     )
 
@@ -378,6 +390,7 @@ def persist_result(
     contacts_to_save: list[ExtractedContact] = []
     tasks_to_save: list[ExtractedTask] = []
     updates_to_save: list[ExtractedProjectUpdate] = []
+    completions_to_save: list[ExtractedCompletion] = []
 
     for i, (_, obj) in enumerate(items):
         if i not in selected:
@@ -388,6 +401,8 @@ def persist_result(
             tasks_to_save.append(obj)
         elif isinstance(obj, ExtractedProjectUpdate):
             updates_to_save.append(obj)
+        elif isinstance(obj, ExtractedCompletion):
+            completions_to_save.append(obj)
 
     count = 0
 
@@ -440,6 +455,14 @@ def persist_result(
             )
         )
         count += 1
+
+    # 4. Erledigungen — bestehende offene Aufgaben schließen. Falls die Aufgabe
+    # zwischenzeitlich nicht mehr offen/vorhanden ist (Race, doppelte Bestätigung),
+    # überspringen statt den gesamten Persistenz-Lauf abzubrechen.
+    for comp in completions_to_save:
+        with contextlib.suppress(ValueError):
+            repo.mark_task_done(comp.task_id)
+            count += 1
 
     return count
 
@@ -704,12 +727,17 @@ class Orchestrator:
         ``_EXTRACTION_RETRY_DELAY`` s; in Tests auf 0.0 setzen).
         """
         known_names = get_known_names_context(self._repo)
+        open_tasks = get_open_tasks_context(self._repo)
         last_exc: Exception = RuntimeError("Extraktion: kein Versuch unternommen")
         for attempt in range(_EXTRACTION_RETRIES):
             tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
             try:
                 return run_extraction(
-                    transcript, tmp_repo, self._settings, known_names_context=known_names
+                    transcript,
+                    tmp_repo,
+                    self._settings,
+                    known_names_context=known_names,
+                    open_tasks_context=open_tasks,
                 )
             except Exception as exc:
                 last_exc = exc

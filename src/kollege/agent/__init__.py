@@ -42,8 +42,10 @@ __all__ = [
     "agent",
     "build_known_names_context",
     "build_model",
+    "build_open_tasks_context",
     "filter_known_names",
     "get_known_names_context",
+    "get_open_tasks_context",
     "pre_warm_model",
     "run_clarification_response",
     "run_extraction",
@@ -117,6 +119,40 @@ def get_known_names_context(
     return build_known_names_context(c_names, p_names)
 
 
+def build_open_tasks_context(tasks: list[Task]) -> str:
+    """Formatiert offene Aufgaben (mit IDs) als Kontext-Block für den Agenten.
+
+    Gibt einen leeren String zurück, wenn keine Aufgaben offen sind. Der Block
+    wird dem Transkript vorangestellt, damit der Agent Erledigungs-Aussagen im
+    Text ("Zaun bei Müller ist gestrichen") gegen eine bestehende offene Aufgabe
+    abgleichen kann, statt eine neue Aufgabe anzulegen (Schritt 8.17).
+    """
+    if not tasks:
+        return ""
+    lines: list[str] = [
+        "[OFFENE AUFGABEN — zum Abgleich mit Erledigungs-Aussagen im Text]",
+    ]
+    for t in tasks:
+        due = f" (fällig: {t.due})" if t.due else ""
+        lines.append(f"#{t.id} {t.title}{due}")
+    lines.append(
+        "Beschreibt der Text, dass eine dieser Aufgaben erledigt wurde, trage sie im "
+        "completed-Feld ein (task_id und task_title unverändert aus dieser Liste "
+        "übernehmen) statt eine neue Aufgabe anzulegen. Schließe nur bei eindeutiger "
+        "Übereinstimmung. Bei Unsicherheit oder Mehrdeutigkeit: clarification-Feld "
+        "setzen statt zu raten."
+    )
+    return "\n".join(lines)
+
+
+def get_open_tasks_context(repo: Repository) -> str:
+    """Offene Aufgaben aus dem Repository laden und als Kontext-String formatieren.
+
+    Gibt einen leeren String zurück, wenn keine Aufgaben offen sind.
+    """
+    return build_open_tasks_context(repo.query_open_items())
+
+
 _SYSTEM_PROMPT = """
 Du bist Kollege, ein persönlicher Assistent für eine selbstständige Landschaftsarchitektin.
 Deine Aufgabe: Aus Sprachnotizen oder Nachrichten strukturierte Daten extrahieren.
@@ -125,10 +161,18 @@ Extrahiere:
 - Kontakte (Personen/Firmen, die erwähnt werden)
 - Aufgaben (To-Dos, Fristen, Zeitfenster)
 - Projektstatus-Hinweise (Statusänderungen, nächste Schritte, wer wartet auf wen)
+- Erledigungen bestehender Aufgaben (siehe unten)
 
 Nutze die verfügbaren Tools direkt zum Speichern erkannter Daten.
 Falls etwas unklar ist, setze das clarification-Feld statt zu raten.
 Antworte immer auf Deutsch.
+
+Beschreibt der Text, dass eine bestehende **offene Aufgabe** (siehe ggf. mitgelieferte
+Liste offener Aufgaben im Kontext) bereits erledigt wurde, trage sie im completed-Feld
+ein (task_id und task_title unverändert aus der Liste übernehmen) statt eine neue
+Aufgabe anzulegen. Schließe nur bei eindeutiger Übereinstimmung; bei Unsicherheit oder
+Mehrdeutigkeit setze stattdessen das clarification-Feld. Ohne Liste offener Aufgaben im
+Kontext oder ohne passenden Treffer bleibt completed leer.
 
 Erfasse so **wenige, klar getrennte** Einträge wie möglich:
 - Lege pro echter Aufgabe **genau eine** Aufgabe an. Zerlege einen Satz nicht in
@@ -531,6 +575,7 @@ def run_extraction(
     repo: Repository,
     settings: Settings,
     known_names_context: str | None = None,
+    open_tasks_context: str | None = None,
 ) -> ExtractionResult:
     """Extraktion aus Transkript synchron ausführen (Produktions-Pfad).
 
@@ -541,13 +586,19 @@ def run_extraction(
     ``known_names_context``: Bekannte Kontakt-/Projektnamen aus dem Repository,
     formatiert via ``build_known_names_context()``. Wird dem Transkript vorangestellt,
     damit das LLM Whisper-Verhörer erkennen und normalisieren kann.
+
+    ``open_tasks_context``: Offene Aufgaben aus dem Repository, formatiert via
+    ``build_open_tasks_context()``. Wird ebenfalls vorangestellt, damit das LLM
+    Erledigungs-Aussagen im Text gegen eine bestehende Aufgabe abgleichen kann
+    (Schritt 8.17).
     """
     model = build_model(settings)
 
-    # Bekannte Namen dem Transkript voranstellen (nur wenn nicht leer).
+    # Bekannte Namen und offene Aufgaben dem Transkript voranstellen (nur wenn nicht leer).
+    context_blocks = [block for block in (known_names_context, open_tasks_context) if block]
     augmented = transcript
-    if known_names_context:
-        augmented = f"{known_names_context}\n\n[NOTIZ]\n{transcript}"
+    if context_blocks:
+        augmented = "\n\n".join([*context_blocks, f"[NOTIZ]\n{transcript}"])
 
     # Primär-Pfad: Tool-Output-Modus (ExtractionResult als final_result-Tool).
     # Wird von TestModel/FunctionModel im CI genutzt und von starken Modellen.
