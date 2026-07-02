@@ -49,6 +49,7 @@ __all__ = [
     "pre_warm_model",
     "run_clarification_response",
     "run_extraction",
+    "run_gap_check",
     "run_revision",
 ]
 
@@ -520,6 +521,85 @@ def run_revision(
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
     return run_extraction(
         revision_prompt, tmp_repo, settings, known_names_context=known_names_context
+    )
+
+
+def _format_result_for_gap_check(result: ExtractionResult) -> str:
+    """Aktuelles ExtractionResult für den Lücken-Prüfungs-Prompt formatieren.
+
+    Anders als ``_format_result_for_revision`` markiert diese Darstellung fehlende
+    Fälligkeiten/Projektzuordnungen **explizit** ("OHNE Fälligkeitsdatum"), damit
+    das Modell im zweiten Durchgang Lücken direkt sieht, und listet auch Kontakte
+    und Erledigungen mit auf.
+    """
+    lines: list[str] = []
+    for c in result.contacts:
+        lines.append(f"  - Kontakt: {c.name}")
+    for t in result.tasks:
+        due = f"fällig {t.due}" if t.due else "OHNE Fälligkeitsdatum"
+        proj = f"Projekt {t.project}" if t.project else "OHNE Projektzuordnung"
+        contact = f"Kontakt {t.contact}" if t.contact else "ohne Kontakt"
+        lines.append(f"  - Aufgabe: {t.title} ({due}; {proj}; {contact})")
+    for pu in result.project_updates:
+        status = f" → {pu.status}" if pu.status else ""
+        lines.append(f"  - Projekt-Update: {pu.project}{status}")
+    for comp in result.completed:
+        lines.append(f"  - Erledigung: #{comp.task_id} {comp.task_title}")
+    return "\n".join(lines) if lines else "  (nichts erkannt)"
+
+
+def run_gap_check(
+    original_transcript: str,
+    first_result: ExtractionResult,
+    settings: Settings,
+    known_names_context: str | None = None,
+    open_tasks_context: str | None = None,
+) -> ExtractionResult:
+    """Zweiter Durchgang: Lücken füllen und Übersehenes nachtragen (Schritt 8.18).
+
+    Der erste Extraktionsdurchgang ist ein One-Shot und lässt gelegentlich Dinge
+    liegen: eine Aufgabe ohne Fälligkeitsdatum, obwohl der Text ein Timing nahelegt;
+    eine Aufgabe ohne Projektzuordnung, obwohl andere Einträge derselben Nachricht
+    (oder ein bekanntes Projekt) klar dazugehören; oder — der wichtigste Fall — eine
+    im Transkript genannte Aufgabe, die komplett übersehen wurde.
+
+    Dieser Lauf bekommt Transkript **und** das Erstergebnis und liefert ein
+    **vollständiges, ergänztes** ExtractionResult. Weil ohnehin jeder Vorschlag vor
+    der Persistenz bestätigt wird (Prinzip 3), soll das Modell Lücken bevorzugt mit
+    einer gut begründeten Vermutung füllen statt bei jeder Kleinigkeit zurückzufragen
+    — nur bei echter, wesentlicher Unklarheit wird eine ``clarification`` gestellt.
+
+    Intern wird — wie bei ``run_revision`` — ``run_extraction`` auf einem
+    zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad und
+    Namensabgleich unverändert wiederverwendet werden.
+    """
+    gap_prompt = (
+        "[LÜCKEN-PRÜFUNG — ZWEITER DURCHGANG]\n"
+        f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
+        f"Erster Extraktions-Vorschlag:\n{_format_result_for_gap_check(first_result)}\n\n"
+        "Prüfe den Vorschlag sorgfältig gegen das Transkript und ergänze ihn:\n"
+        "1. Übersehen: Wurde eine Aufgabe, ein Kontakt, ein Projekt-Update oder eine "
+        "Erledigung im Transkript genannt, fehlt aber im Vorschlag? Trage sie nach.\n"
+        "2. Fälligkeit: Legt der Text ein Timing nahe (»vor dem Termin«, »diese Woche«, "
+        "»bald«, ein Wochentag, ein konkretes Datum), fehlt aber bei einer Aufgabe das "
+        "Datum? Leite ein konkretes ISO-Datum (YYYY-MM-DD) ab.\n"
+        "3. Projektzuordnung: Gehört eine Aufgabe zu einem bekannten Projekt oder zu "
+        "einem Projekt, das andere Einträge derselben Nachricht nennen? Ordne sie zu.\n"
+        "4. Kontaktzuordnung: analog zur Projektzuordnung.\n"
+        "Fülle Lücken mit einer gut begründeten Vermutung aus dem Kontext — die Nutzerin "
+        "bestätigt jeden Vorschlag, bevor etwas gespeichert wird. Stelle nur bei echter, "
+        "wesentlicher Unklarheit eine Rückfrage (clarification). Erfinde nichts, was das "
+        "Transkript nicht hergibt, und lege keine Duplikate an.\n"
+        "Gib das VOLLSTÄNDIGE, ergänzte Ergebnis zurück (alle bereits erkannten Einträge "
+        "plus deine Ergänzungen), nicht nur die Änderungen."
+    )
+    tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
+    return run_extraction(
+        gap_prompt,
+        tmp_repo,
+        settings,
+        known_names_context=known_names_context,
+        open_tasks_context=open_tasks_context,
     )
 
 

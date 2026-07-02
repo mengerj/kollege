@@ -5,6 +5,65 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Schritt 8.18 — Zwei-Durchgang-Extraktion + deutsche Datumsanzeige
+
+**Auslöser (Live-Test, Nutzerin).** Nach 8.14–8.17 ist die Nutzung deutlich besser:
+eine längere Sprachnotiz mit mehreren Aufgaben zum selben Projekt wurde korrekt
+erfasst und ins Projekt-Log geschrieben. Eine Aufgabe brauchte aber eine Korrektur,
+damit sie ein Datum bekam (beiläufig erwähnt „muss ich vor dem Termin erledigen").
+Wunsch: Das System soll solche Lücken **proaktiv selbst schließen** (Datum, Projekt-
+bezug, und sicherstellen, dass keine Aufgabe ganz übersehen wird) statt Korrekturen
+abzuwarten. Zusätzlich: Datum lesbarer anzeigen (Wochentag + Tag, Monat, Jahr).
+
+**Kern-Einsicht (Design).** Der bestehende Bestätigungs-Loop macht **begründetes
+Raten sicher** — jeder Vorschlag wird vor der Persistenz gezeigt und ist per Zitat-
+Antwort korrigierbar. Darum füllt der zweite Durchgang Lücken bevorzugt mit einer
+guten Vermutung (im Vorschlag sichtbar) und fragt nur bei echter, wesentlicher
+Unklarheit zurück. Das adressiert genau die häufigen Korrekturen, ohne die Nutzerin
+mit Rückfragen zu überziehen (Prinzip 3 bleibt gewahrt: Check = Bestätigung).
+
+**Umsetzung.**
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): neue Funktion
+  `run_gap_check(transcript, first_result, …)` + Helper `_format_result_for_gap_check`.
+  Bekommt Transkript **und** Erstergebnis, prüft explizit auf (1) Übersehenes,
+  (2) fehlende Frist, (3) fehlende Projekt-, (4) fehlende Kontaktzuordnung und liefert
+  ein **vollständiges, ergänztes** `ExtractionResult`. Baut — wie `run_revision` —
+  einen zusammengesetzten Prompt und ruft `run_extraction` auf → Primär-/Fallback-
+  Pfad, Namensabgleich und offene-Aufgaben-Kontext werden unverändert wiederverwendet.
+  Fehlende Felder werden im Prompt als Lücke markiert („OHNE Fälligkeitsdatum" etc.).
+- [`orchestrator.py`](src/kollege/orchestrator.py): `_extract()` ist jetzt zweistufig
+  — `_extract_first_pass` (bisheriger One-Shot mit Retry) → `run_gap_check`. **Immer
+  beide Durchgänge**, außer der erste stellt bereits eine Rückfrage (Vorrang).
+  Scheitert der zweite Durchgang, wird das Erstergebnis genutzt (best-effort, kein
+  Abbruch). Korrektur-/Rückfrage-Läufe bleiben einstufig (nutzergesteuert).
+- **Datumsanzeige:** `format_date_de(date)` (`"Do. 2. Juli 2026"`, keine führende
+  Null) in `format_proposal`, `format_open_tasks` und den Markdown-Log-Einträgen.
+  **Intern/gegenüber dem LLM bleibt ISO** (`YYYY-MM-DD`) — relative Fristauflösung
+  unberührt.
+
+**Tests.**
+- [`test_agent.py`](tests/test_agent.py): `run_gap_check`-Prompt-Komposition
+  (Transkript + Erstergebnis + explizite Lücken + durchgereichter Kontext).
+- [`test_orchestrator.py`](tests/test_orchestrator.py): autouse-Fixture
+  `_passthrough_gap_check` (bestehende Tests mocken nur den 1. Durchgang; 2. Durchgang
+  als Identität); neue Tests: Anreicherung + Nachtragen, Rückfrage überspringt 2.
+  Durchgang, Fehler im 2. Durchgang → Erstergebnis; `format_date_de`-Beispiele
+  (inkl. Umlaut-Monat) und Anzeige in Vorschlag/`/offen`. Bestehende ISO-Erwartungen
+  in zwei Tests auf die deutsche Anzeige umgestellt.
+- [`test_dauerbetrieb.py`](tests/test_dauerbetrieb.py): dieselbe Passthrough-Fixture,
+  damit die Retry-Zähltests nur den 1. Durchgang betreffen.
+
+**Grenzen / bewusst offen.** Immer zwei Durchgänge = ~doppelte LLM-Latenz pro Notiz
+(auf lokalem Ollama spürbar); bewusst so gewählt, weil der „nichts übersehen"-Check
+auf jede Notiz soll. Ob sich ein deterministisches Gate (2. Lauf nur bei erkennbaren
+Lücken) lohnt, entscheidet der nächste Live-Test. Fallback-Pfad (schwache Modelle)
+läuft die Gap-Prüfung mit, kann sie aber wie schon `completed` nicht voll nutzen.
+
+**Status.** 275 Tests grün; `ruff`/`ruff format`/`mypy --strict` sauber. Branch
+`feat/schritt-8.18-zweipass-datumsformat`.
+
+---
+
 ## 2026-07-02 — Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen
 
 **Ziel:** Beschreibt die Nutzerin im Freitext, was sie erledigt hat, sollen passende

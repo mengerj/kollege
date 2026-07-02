@@ -32,6 +32,22 @@ def _repo() -> Repository:
     return Repository(sqlite3.connect(":memory:", check_same_thread=False))
 
 
+@pytest.fixture(autouse=True)
+def _passthrough_gap_check() -> object:
+    """Zweiten Durchgang (Schritt 8.18) als Passthrough neutralisieren.
+
+    Die Retry-Tests mocken nur den ersten Durchgang (``run_extraction``). Der
+    zweite Durchgang (``run_gap_check``) gibt hier das Erstergebnis unverändert
+    zurück, damit die Zähl-/Fehler-Erwartungen weiterhin nur den ersten Durchgang
+    betreffen und kein echtes Modell gebaut wird.
+    """
+    with patch(
+        "kollege.orchestrator.run_gap_check",
+        side_effect=lambda original_transcript, first_result, *a, **k: first_result,
+    ):
+        yield
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(db_path=str(tmp_path / "test.db"), markdown_dir=str(tmp_path / "logs"))
