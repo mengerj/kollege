@@ -267,6 +267,7 @@ def test_orchestrator_passes_known_names_to_run_extraction(
         repo_: Repository,
         settings: Settings,
         known_names_context: str | None = None,
+        **_: object,
     ) -> ExtractionResult:
         captured_kwargs.append({"known_names_context": known_names_context})
         return ExtractionResult(
@@ -304,6 +305,7 @@ def test_orchestrator_known_names_empty_for_new_repo(log_dir: Path) -> None:
         repo_: Repository,
         settings: Settings,
         known_names_context: str | None = None,
+        **_: object,
     ) -> ExtractionResult:
         captured_kwargs.append({"known_names_context": known_names_context})
         return ExtractionResult()

@@ -5,6 +5,56 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen
+
+**Ziel:** Beschreibt die Nutzerin im Freitext, was sie erledigt hat, sollen passende
+**offene Aufgaben** erkannt und — nach Bestätigung — geschlossen werden. Letzter
+Schritt des priorisierten 8.14–8.17-Blocks aus dem Live-Test; baut auf 8.15
+(`mark_task_done`, offene-Aufgaben-Query) auf.
+
+**Umsetzung (Variante A — Erkennung + Abgleich in einem Extraktionslauf, bestätigt):**
+- [`models.py`](src/kollege/models.py): neues `ExtractedCompletion` (`task_id`,
+  `task_title`); `ExtractionResult` bekommt das Feld `completed`, `is_empty()`
+  berücksichtigt es.
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): neue Funktionen
+  `build_open_tasks_context()`/`get_open_tasks_context()` — analog zum
+  Bekannte-Namen-Kontext (8.7) werden alle offenen Aufgaben (mit IDs) formatiert
+  und dem Transkript vorangestellt. `run_extraction()` bekommt den zusätzlichen
+  Parameter `open_tasks_context`; System-Prompt weist den Agenten an, Erledigungs-
+  Aussagen gegen diese Liste abzugleichen und bei Unsicherheit/Mehrdeutigkeit
+  **clarification** statt raten zu setzen — nie automatisch schließen (Prinzip 3).
+- [`orchestrator.py`](src/kollege/orchestrator.py): `_extract()` lädt den Kontext
+  über `get_open_tasks_context(self._repo)` und reicht ihn durch. Neuer
+  Eintragstyp im Bestätigungs-Loop (`✅ Aufgabe schließen: #N Titel`) in
+  `_result_items`/`dedupe_result` (Dedup per `task_id`)/`persist_result` — bei
+  Bestätigung ruft `persist_result` `repo.mark_task_done(task_id)` auf (aus 8.15);
+  eine zwischenzeitlich verschwundene/bereits erledigte Aufgabe wird übersprungen
+  statt den gesamten Persistenz-Lauf abzubrechen (`contextlib.suppress(ValueError)`).
+- Bewusst **nicht** im Fallback-Pfad (Tool-Only-Modus für schwache lokale Modelle)
+  unterstützt: der Fallback rekonstruiert `ExtractionResult` aus einem frischen
+  Temp-Repo ohne die real offenen Aufgaben — dort gäbe es nichts zum Abgleichen.
+  Bekannte, dokumentierte Grenze (siehe 8.11-Analyse zu schwachen Modellen).
+
+**Tests:** neue Datei [`test_completions.py`](tests/test_completions.py) — Kontext-
+Bausteine ohne LLM, ein `FunctionModel`-Test (DoD): Erledigungs-Notiz + passende
+offene Aufgabe im Kontext → `completed`-Eintrag mit korrekter `task_id` (aus dem
+Kontext übernommen, nicht geraten), `dedupe_result`/`persist_result` gegen
+In-Memory-Repo, sowie Orchestrator-Integration end-to-end: Notiz → „schließen"-
+Vorschlag → Bestätigung → Aufgabe erledigt; mehrdeutiger Fall → Rückfrage, nichts
+automatisch geschlossen. `test_known_names.py` musste an zwei Stellen minimal
+angepasst werden (`**_: object` in zwei `_fake_extraction`-Stubs), weil
+`run_extraction` jetzt zusätzlich mit `open_tasks_context=` aufgerufen wird.
+268 passed (1 deselected: `eval`-Marker/real-LLM), `ruff`/`mypy --strict` sauber.
+
+**Damit ist der 8.14–8.17-Nutzbarkeits-Block aus dem Live-Test abgeschlossen.**
+
+**Nächster Schritt:** Zurück zur Priorisierung vor E-Mail (Schritt 9): entweder
+**8.5** (restliche Live-Edge-Cases live gegenprüfen) oder **8.12** (DSGVO-konforme
+EU-LLM-Anbieter anbinden, war hinter 8.14–8.17 zurückgestellt) — im nächsten
+Schritt entscheiden, siehe ROADMAP.md.
+
+---
+
 ## 2026-07-02 — Schritt 8.16 — Projekt-Markdown-Logs füllen (append_entry verdrahten)
 
 **Problem:** [`open_project_log`](src/kollege/logs/__init__.py) legte die Log-Datei

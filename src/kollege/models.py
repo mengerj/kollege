@@ -100,6 +100,18 @@ class ExtractedProjectUpdate(BaseModel):
     waiting_on: WaitingOn | None = None
 
 
+class ExtractedCompletion(BaseModel):
+    """Eine erkannte Erledigungs-Aussage zu einer bestehenden offenen Aufgabe.
+
+    ``task_id``/``task_title`` werden unverändert aus der dem Agenten mitgegebenen
+    Liste offener Aufgaben übernommen (Schritt 8.17) — kein Raten, keine neue
+    Aufgabe anlegen.
+    """
+
+    task_id: int
+    task_title: str
+
+
 class ExtractionResult(BaseModel):
     """Gebündeltes Ergebnis einer Extraktion aus einer Nachricht/Sprachnotiz.
 
@@ -110,10 +122,11 @@ class ExtractionResult(BaseModel):
     contacts: list[ExtractedContact] = Field(default_factory=list)
     tasks: list[ExtractedTask] = Field(default_factory=list)
     project_updates: list[ExtractedProjectUpdate] = Field(default_factory=list)
+    completed: list[ExtractedCompletion] = Field(default_factory=list)
     clarification: str | None = None
 
     def is_empty(self) -> bool:
-        return not (self.contacts or self.tasks or self.project_updates)
+        return not (self.contacts or self.tasks or self.project_updates or self.completed)
 
 
 # --------------------------------------------------------------------------- #

@@ -12,33 +12,34 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen.**
+**Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden.**
 
-Teil des priorisierten Blocks **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
-(mistral3.1-medium via OpenRouter), der vor der E-Mail-Integration (Schritt 9)
-abgearbeitet wird. Details je Schritt weiter unten; Herleitung siehe
-[PROJECT_LOG.md](PROJECT_LOG.md) (Einträge 2026-07-02).
+Der priorisierte Block **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
+(mistral3.1-medium via OpenRouter) ist mit Schritt 8.17 **abgeschlossen**
+(Details/Herleitung siehe [PROJECT_LOG.md](PROJECT_LOG.md), Einträge 2026-07-02).
+Der Schreib-/Abfragepfad ist damit stabil — 8.12 war genau darauf zurückgestellt.
 
-**Schritt 8.16 ist erledigt:** [`persist_result`](src/kollege/orchestrator.py)
-schreibt bei jeder bestätigten projektbezogenen Änderung (Projekt-Update oder
-projektbezogene Aufgabe) einen datierten, menschenlesbaren Eintrag über
-`ProjectLog.append_entry()` — Projekt-Logs bleiben nicht mehr leer.
+**Schritt 8.17 ist erledigt:** Erledigungs-Aussagen im Freitext werden gegen die
+offenen Aufgaben abgeglichen (`completed`-Feld, `build_open_tasks_context()`),
+als eigener Vorschlagstyp „✅ Aufgabe schließen" angezeigt und erst nach
+Bestätigung über `mark_task_done` (aus 8.15) geschlossen; bei Unsicherheit/
+Mehrdeutigkeit stellt der Agent eine Rückfrage statt zu raten.
 
-Jetzt konkret **Schritt 8.17**: Beschreibt die Nutzerin im Freitext, was sie
-erledigt hat, sollen passende **offene Aufgaben** erkannt und — nach Bestätigung —
-über `mark_task_done` (aus 8.15) geschlossen werden. Details/DoD unten in
-Schritt 8.17.
+**Wahl für diesen Schritt (autonome Session, keine Nutzerin verfügbar):** von den
+beiden zurückgestellten Kandidaten — **8.5** (restliche Live-Edge-Cases) und
+**8.12** (EU-LLM-Anbieter) — ist 8.12 der besser automatisierbare nächste Schritt:
+reine Code-/Config-Arbeit (`build_model()` erweitern, Benchmark 8.11 nutzen), kein
+echtes Signal-Gerät/Docker-Linking nötig. 8.5 bleibt offen und sollte im nächsten
+**interaktiven** Live-Test mit der Nutzerin weiterlaufen. Details/DoD zu 8.12
+weiter unten.
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
-> Deutsch. Bei 8.17 Erkennung+Abgleich in **einem** Extraktionslauf (Variante A).
->
-> **Schritt 8.12 (EU-LLM-Anbieter)** bleibt offen, ist aber hinter den 8.14–8.17-
-> Block zurückgestellt: der Schreib-/Abfragepfad soll erst stabil sein. Für Tests
-> reicht vorerst OpenRouter.
+> Deutsch.
 >
 > **IMAP/E-Mail (Schritt 9 ff.) zurückgestellt**, bis Phase 1.5 rund läuft.
-> Schritt 8.5 (restliche Live-Edge-Cases) läuft parallel weiter.
+> Schritt 8.5 (restliche Live-Edge-Cases) läuft parallel weiter, sobald wieder
+> live mit der Nutzerin getestet wird.
 
 ---
 
@@ -62,12 +63,12 @@ Schritt 8.17.
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
 | 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
-| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen (hinter 8.14–8.17 zurückgestellt) |
+| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ▶ nächster Schritt |
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
 | 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ✅ erledigt |
 | 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ✅ erledigt |
 | 8.16 | Projekt-Markdown-Logs füllen (append_entry verdrahten) | 1.5 | ✅ erledigt |
-| 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ▶ nächster Schritt |
+| 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -596,7 +597,7 @@ neuen datierten Eintrag; drei Tests in
 Existenz) inkl. append-only bei zwei aufeinanderfolgenden Änderungen. 252 Tests
 grün, `ruff`/`mypy` sauber.
 
-### Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen ⬜
+### Schritt 8.17 — Erledigungen aus Freitext erkennen & abgleichen ✅
 
 **Ziel.** Beschreibt die Nutzerin im Freitext, was sie erledigt hat („Heute den
 Zaun bei Müller gestrichen und das Angebot an die Gemeinde rausgeschickt"), sollen
@@ -622,9 +623,27 @@ Die Intelligenz „getan vs. zu tun" sitzt in der Extraktion, nicht im Routing.
 **Abhängigkeit.** Baut auf 8.15 (`mark_task_done`, offene-Aufgaben-Query) auf →
 daher zuletzt.
 
-**DoD.** `FunctionModel`-Test: eine Erledigungs-Notiz mit passender offener Aufgabe
-erzeugt einen „schließen"-Vorschlag; Bestätigung setzt Status auf `erledigt`;
-ohne guten Treffer → Rückfrage statt falsches Schließen. Kette grün.
+**Umgesetzt.**
+- [`models.py`](src/kollege/models.py): `ExtractedCompletion` (`task_id`,
+  `task_title`); `ExtractionResult.completed` + `is_empty()` berücksichtigt es.
+- [`agent/__init__.py`](src/kollege/agent/__init__.py):
+  `build_open_tasks_context()`/`get_open_tasks_context()` (analog zu 8.7) formatieren
+  offene Aufgaben mit IDs als Kontext-Block; `run_extraction()` bekommt den Parameter
+  `open_tasks_context`; System-Prompt weist zum Abgleich an, bei Unsicherheit/
+  Mehrdeutigkeit `clarification` statt raten.
+- [`orchestrator.py`](src/kollege/orchestrator.py): `_extract()` lädt den Kontext aus
+  dem echten Repo; neuer Eintragstyp „✅ Aufgabe schließen: #N Titel" in
+  `_result_items`/`dedupe_result`/`persist_result`; Bestätigung → `mark_task_done`.
+  Fallback-Pfad (Tool-Only-Modus für schwache Modelle) unterstützt `completed` bewusst
+  **nicht** — der Temp-Repo dort kennt die real offenen Aufgaben nicht.
+
+**DoD.** ✅ `FunctionModel`-Test
+(`test_run_extraction_function_model_detects_completion` in
+[`test_completions.py`](tests/test_completions.py)): eine Erledigungs-Notiz mit
+passender offener Aufgabe im Kontext erzeugt einen `completed`-Eintrag mit aus dem
+Kontext übernommener `task_id`; Orchestrator-Tests zeigen „schließen"-Vorschlag →
+Bestätigung setzt Status auf `erledigt`; mehrdeutiger Fall → Rückfrage statt falsches
+Schließen. 268 Tests grün, `ruff`/`mypy --strict` sauber.
 
 ---
 
