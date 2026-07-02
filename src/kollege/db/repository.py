@@ -11,7 +11,7 @@ import json
 import sqlite3
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Concatenate, cast
 
 from kollege.models import (
@@ -304,6 +304,46 @@ class Repository:
         d = dict(row)
         d["depends_on"] = json.loads(d.get("depends_on") or "[]")
         return Task.model_validate(d)
+
+    @_synchronized
+    def update_task(
+        self,
+        task_id: int,
+        title: str | None = None,
+        due: date | None = None,
+        project_id: int | None = None,
+    ) -> Task:
+        """Felder einer bestehenden Aufgabe ändern (Schritt 8.19 — „Aufgabe bearbeiten").
+
+        Nur nicht-``None``-Argumente werden geschrieben; ``None`` heißt „Feld
+        unverändert lassen" (ein Feld wieder zu leeren ist bewusst nicht vorgesehen —
+        Korrektur, kein Zurücksetzen). ``ValueError``, wenn die Aufgabe nicht
+        existiert. ``updated_at`` gibt es auf ``tasks`` (noch) nicht — daher kein
+        Zeitstempel-Update; bewusste Grenze.
+        """
+        existing = self._get_task_by_id(task_id)
+        if existing is None:
+            raise ValueError(f"Task {task_id} nicht gefunden")
+        new_title = title if title is not None else existing.title
+        new_due = due if due is not None else existing.due
+        new_project_id = project_id if project_id is not None else existing.project_id
+        self._conn.execute(
+            "UPDATE tasks SET title = ?, due = ?, project_id = ? WHERE id = ?",
+            (
+                new_title,
+                new_due.isoformat() if new_due is not None else None,
+                new_project_id,
+                task_id,
+            ),
+        )
+        self._conn.commit()
+        result = self._get_task_by_id(task_id)
+        assert result is not None
+        return result
+
+    def get_project_by_id(self, project_id: int) -> Project | None:
+        """Projekt per ID (öffentlich) — z. B. für Log-Konsistenz beim Aufgaben-Edit."""
+        return self._get_project_by_id(project_id)
 
     @_synchronized
     def update_task_status(self, task_id: int, status: TaskStatus) -> Task:

@@ -5,6 +5,54 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-02 — Schritt 8.19 — Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben)
+
+**Auslöser (Live-Test, Nutzerin).** Über `/offen` fiel auf, dass Aufgabe #6 „Bad
+Eibling" statt „Bad Aibling" hieß. Versuch, den Eintrag per Notiz zu korrigieren:
+Rückfrage war vielversprechend (LLM bot Korrektur an), nach dem 👍 kam aber „Ich
+konnte nichts Konkretes erkennen". **Diagnose:** kein Halluzinationsproblem, sondern
+eine **fehlende Fähigkeit** — `ExtractionResult` kannte nur *neue* Einträge +
+Erledigungen, das Repository nur `create_task`/`update_task_status`. Es gab weder
+Schema-Feld noch Repo-Methode, um eine bestehende Aufgabe zu ändern. Das LLM verhielt
+sich korrekt (leer statt Duplikat). Es ist die in Schritt 8.6 als **Stufe B** bewusst
+zurückgestellte „Korrektur bereits gespeicherter Einträge". Nutzerin-Entscheidung:
+**nur Aufgaben** umsetzen (Kontakt-Umbenennung mit Merge-Semantik später).
+
+**Umsetzung (spiegelt 8.17 „Erledigungen").**
+- [`models.py`](src/kollege/models.py): `ExtractedTaskEdit` (`task_id`/`task_title`
+  aus der Liste offener Aufgaben; optionale `new_title`/`new_due`/`new_project`, nur
+  gesetzte Felder ändern). `ExtractionResult.edits` + `is_empty()`.
+- [`repository.py`](src/kollege/db/repository.py): `update_task(task_id, …)` — nur
+  nicht-`None`-Felder schreiben, `ValueError` bei fehlender Aufgabe; öffentliche
+  `get_project_by_id` für Log-Konsistenz.
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): System-Prompt +
+  `build_open_tasks_context`-Hinweis erklären das edits-Feld (task_id aus der Liste,
+  bei Mehrdeutigkeit `clarification`). **Wichtige Nebenkorrektur:**
+  `run_revision`/`run_clarification_response` reichen jetzt `open_tasks_context` mit.
+  Das war die eigentliche Live-Bug-Ursache: der Lauf *nach* der Rückfrage (👍) bekam
+  den Offene-Aufgaben-Kontext bisher **nicht** — ohne die IDs konnte er die zu
+  ändernde Aufgabe gar nicht referenzieren. (Gilt genauso für Erledigungen aus 8.17.)
+- [`orchestrator.py`](src/kollege/orchestrator.py): Vorschlagstyp „✏️ Aufgabe ändern:
+  #N Titel — Titel → «…», Frist → …" (`_result_items`/`_edit_changes`); `dedupe_result`
+  dedupt edits per `task_id`; `persist_result` ruft `update_task` und vermerkt die
+  Korrektur **append-only** im Projekt-Log (Prinzip 4); verschwundene Aufgabe wird
+  übersprungen.
+
+**Tests.** Neue Datei [`test_task_edits.py`](tests/test_task_edits.py) (FunctionModel-
+Edit-Erkennung, dedupe/proposal/persist inkl. Log-Korrektur, Orchestrator-End-to-End,
+Kontext-Durchreichung im Rückfrage-Antwort-Lauf) + `update_task`-Tests in
+[`test_db.py`](tests/test_db.py). Außerdem **Nachzügler aus 8.18 behoben:**
+`test_completions.py` bekam die `_passthrough_gap_check`-autouse-Fixture — dort liefen
+die Orchestrator-Tests seit 8.18 sonst gegen ein echtes Modell (nur durch fehlende
+Ollama-Verbindung „grün"). 289 Tests grün; `ruff`/`ruff format`/`mypy --strict` sauber.
+
+**Grenzen.** Kontakt-Umbenennung (Merge/Dedup) offen. Adressierung nur über den
+Offene-Aufgaben-Kontext (keine persistierte Last-Batch-Referenz). Fallback-Pfad
+(schwache Modelle) unterstützt edits nicht (wie schon `completed`). Branch
+`feat/schritt-8.19-aufgaben-bearbeiten` (stapelt auf 8.18).
+
+---
+
 ## 2026-07-02 — Schritt 8.18 — Zwei-Durchgang-Extraktion + deutsche Datumsanzeige
 
 **Auslöser (Live-Test, Nutzerin).** Nach 8.14–8.17 ist die Nutzung deutlich besser:

@@ -140,8 +140,11 @@ def build_open_tasks_context(tasks: list[Task]) -> str:
         "Beschreibt der Text, dass eine dieser Aufgaben erledigt wurde, trage sie im "
         "completed-Feld ein (task_id und task_title unverändert aus dieser Liste "
         "übernehmen) statt eine neue Aufgabe anzulegen. Schließe nur bei eindeutiger "
-        "Übereinstimmung. Bei Unsicherheit oder Mehrdeutigkeit: clarification-Feld "
-        "setzen statt zu raten."
+        "Übereinstimmung. Beschreibt der Text eine Korrektur/Änderung an einer dieser "
+        "Aufgaben (Titel, Frist oder Projektzuordnung), trage sie im edits-Feld ein "
+        "(task_id/task_title aus dieser Liste, nur geänderte Felder setzen) statt eine "
+        "neue Aufgabe anzulegen. Bei Unsicherheit oder Mehrdeutigkeit: clarification-"
+        "Feld setzen statt zu raten."
     )
     return "\n".join(lines)
 
@@ -163,6 +166,7 @@ Extrahiere:
 - Aufgaben (To-Dos, Fristen, Zeitfenster)
 - Projektstatus-Hinweise (Statusänderungen, nächste Schritte, wer wartet auf wen)
 - Erledigungen bestehender Aufgaben (siehe unten)
+- Änderungen an bestehenden Aufgaben (siehe unten)
 
 Nutze die verfügbaren Tools direkt zum Speichern erkannter Daten.
 Falls etwas unklar ist, setze das clarification-Feld statt zu raten.
@@ -174,6 +178,16 @@ ein (task_id und task_title unverändert aus der Liste übernehmen) statt eine n
 Aufgabe anzulegen. Schließe nur bei eindeutiger Übereinstimmung; bei Unsicherheit oder
 Mehrdeutigkeit setze stattdessen das clarification-Feld. Ohne Liste offener Aufgaben im
 Kontext oder ohne passenden Treffer bleibt completed leer.
+
+Beschreibt der Text eine **Korrektur/Änderung an einer bestehenden offenen Aufgabe**
+(z. B. „Die Aufgabe Bad Eibling heißt eigentlich Bad Aibling", „bei der Zaun-Aufgabe
+ist die Frist doch der Freitag", „ordne das der Gemeinde-Sache zu"), lege **keine neue
+Aufgabe** an und schließe sie nicht — trage stattdessen einen Eintrag im edits-Feld ein:
+task_id und task_title unverändert aus der Liste offener Aufgaben übernehmen und nur die
+tatsächlich geänderten Felder setzen (new_title, new_due als ISO-Datum, new_project);
+unveränderte Felder bleiben leer. Nur bei eindeutiger Zuordnung zu genau einer Aufgabe;
+bei Unsicherheit/Mehrdeutigkeit stattdessen clarification setzen. Ohne Liste offener
+Aufgaben im Kontext bleibt edits leer.
 
 Erfasse so **wenige, klar getrennte** Einträge wie möglich:
 - Lege pro echter Aufgabe **genau eine** Aufgabe an. Zerlege einen Satz nicht in
@@ -465,6 +479,8 @@ def _format_result_for_revision(result: ExtractionResult) -> str:
     for pu in result.project_updates:
         status = f" → {pu.status}" if pu.status else ""
         lines.append(f"  - Projekt: {pu.project}{status}")
+    for ed in result.edits:
+        lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title}")
     return "\n".join(lines) if lines else "  (leer)"
 
 
@@ -489,6 +505,7 @@ def run_revision(
     correction: str,
     settings: Settings,
     known_names_context: str | None = None,
+    open_tasks_context: str | None = None,
     history: list[tuple[str, str]] | None = None,
 ) -> ExtractionResult:
     """Revidiert ein ExtractionResult anhand eines Korrekturhinweises.
@@ -505,7 +522,8 @@ def run_revision(
 
     Intern wird ``run_extraction`` auf einem zusammengesetzten Prompt aufgerufen —
     so wird der gesamte Primär-/Fallback-Pfad wiederverwendet, inklusive
-    Namensabgleich via ``known_names_context``.
+    Namensabgleich via ``known_names_context`` und Aufgaben-Abgleich (Erledigungen/
+    Änderungen an bestehenden Aufgaben) via ``open_tasks_context`` (Schritt 8.19).
     """
     revision_prompt = (
         "[KORREKTUR-LAUF]\n"
@@ -520,7 +538,11 @@ def run_revision(
     )
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
     return run_extraction(
-        revision_prompt, tmp_repo, settings, known_names_context=known_names_context
+        revision_prompt,
+        tmp_repo,
+        settings,
+        known_names_context=known_names_context,
+        open_tasks_context=open_tasks_context,
     )
 
 
@@ -545,6 +567,8 @@ def _format_result_for_gap_check(result: ExtractionResult) -> str:
         lines.append(f"  - Projekt-Update: {pu.project}{status}")
     for comp in result.completed:
         lines.append(f"  - Erledigung: #{comp.task_id} {comp.task_title}")
+    for ed in result.edits:
+        lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title}")
     return "\n".join(lines) if lines else "  (nichts erkannt)"
 
 
@@ -609,6 +633,7 @@ def run_clarification_response(
     answer: str,
     settings: Settings,
     known_names_context: str | None = None,
+    open_tasks_context: str | None = None,
     history: list[tuple[str, str]] | None = None,
 ) -> ExtractionResult:
     """Beantwortet eine zuvor gestellte Rückfrage und extrahiert erneut.
@@ -628,8 +653,9 @@ def run_clarification_response(
     (Schritt 8.14).
 
     Intern wird — wie bei ``run_revision`` — ``run_extraction`` auf einem
-    zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad und
-    Namensabgleich unverändert wiederverwendet werden.
+    zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad,
+    Namensabgleich (``known_names_context``) und Aufgaben-Abgleich
+    (``open_tasks_context``, Schritt 8.19) unverändert wiederverwendet werden.
     """
     response_prompt = (
         "[RÜCKFRAGE-ANTWORT]\n"
@@ -646,7 +672,11 @@ def run_clarification_response(
     )
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
     return run_extraction(
-        response_prompt, tmp_repo, settings, known_names_context=known_names_context
+        response_prompt,
+        tmp_repo,
+        settings,
+        known_names_context=known_names_context,
+        open_tasks_context=open_tasks_context,
     )
 
 
