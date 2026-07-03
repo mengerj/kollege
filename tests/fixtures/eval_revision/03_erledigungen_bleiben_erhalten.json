@@ -1,0 +1,24 @@
+{
+  "id": "erledigungen_bleiben_erhalten",
+  "description": "Live-Fehlerfall 2026-07-02 (Schritt 8.20): Eine lange Notiz mit mehreren Erledigungen. Der Vorschlag hatte zwei Erledigungen erkannt; eine Zitat-Antwort nennt die dritte. Der Korrektur-Lauf muss die zwei bereits erkannten Erledigungen behalten, statt sie zu verlieren. Bindet die konkrete Fehlerklasse als Wächter ein.",
+  "tags": ["revision", "completions-lost", "flakiness"],
+  "original_transcript": "So, kurzes Update zum Kräutergarten Bad Aibling: Den Plan habe ich fertig finalisiert, die Verfügbarkeit der Stauden bei den Gartencentern habe ich auch schon geprüft, und dem Thomas habe ich die Rückmeldung zu Stauden und Plan ebenfalls schon gegeben.",
+  "current_result": {
+    "contacts": [],
+    "tasks": [],
+    "project_updates": [],
+    "completed": [
+      {"task_id": 6, "task_title": "Plan für Kräutergarten Bad Aibling finalisieren"},
+      {"task_id": 7, "task_title": "Verfügbarkeit der gewünschten Stauden bei Gartencentern in der Nähe prüfen"}
+    ],
+    "edits": [],
+    "clarification": null
+  },
+  "correction": "Du hast eine vergessen: Aufgabe #8, dem Thomas vorab Rückmeldung zu Stauden und Plan geben, ist auch schon erledigt.",
+  "known_names": [],
+  "expected": {
+    "min_completed": 3,
+    "must_contain_task_ids": [6, 7, 8],
+    "must_not_be_empty": true
+  }
+}

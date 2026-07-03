@@ -431,3 +431,91 @@ def test_run_revision_uses_history_to_resolve_earlier_reference() -> None:
 
     assert without_history.contacts[0].phone is None
     assert with_history.contacts[0].phone == "08031/12345"
+
+
+# --------------------------------------------------------------------------- #
+# Revisions-Prompt zeigt Erledigungen + Änderungen (Schritt 8.20)              #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_revision_prompt_includes_completed_and_edits() -> None:
+    """Der Korrektur-Lauf muss ``completed`` und ``edits`` des bisherigen Vorschlags
+    im Prompt zeigen — sonst verliert der frische One-Shot sie (Live-Bug 8.20).
+    """
+    from unittest.mock import patch
+
+    from kollege.agent import run_revision
+    from kollege.models import ExtractedCompletion, ExtractedTaskEdit
+
+    captured: dict[str, str] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    current = ExtractionResult(
+        completed=[
+            ExtractedCompletion(task_id=7, task_title="Angebot Kindergarten absenden"),
+            ExtractedCompletion(task_id=8, task_title="Sabine zurückrufen"),
+        ],
+        edits=[ExtractedTaskEdit(task_id=6, task_title="Plan Eibling", new_title="Plan Aibling")],
+    )
+
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_revision(
+            original_transcript="Langes Update mit mehreren erledigten Aufgaben.",
+            current_result=current,
+            correction="Aufgabe #9 ist auch erledigt.",
+            settings=Settings(),
+        )
+
+    prompt = captured["prompt"]
+    # Beide bereits erkannten Erledigungen sind im Prompt sichtbar.
+    assert "Erledigung: #7 Angebot Kindergarten absenden" in prompt
+    assert "Erledigung: #8 Sabine zurückrufen" in prompt
+    # Die Änderung inkl. Zieltitel ist sichtbar.
+    assert "Aufgabe ändern: #6 Plan Eibling" in prompt
+    assert "Titel → «Plan Aibling»" in prompt
+    # Die Übernahme-Anweisung steht im Prompt.
+    assert "unverändert" in prompt
+
+
+def test_run_revision_prompt_completed_survive_reflecting_model() -> None:
+    """Verhaltens-Regression: Ein 'treues' FunctionModel, das nur die im Prompt
+    sichtbaren Aufgaben-IDs zurückgibt, behält dank des Fixes (8.20) die zuvor
+    erkannten Erledigungen und ergänzt die neu genannte.
+    """
+    import re
+    from unittest.mock import patch
+
+    from kollege.agent import run_revision
+    from kollege.models import ExtractedCompletion
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        full = " ".join(
+            str(part.content) for msg in messages for part in msg.parts if hasattr(part, "content")
+        )
+        ids = sorted({int(n) for n in re.findall(r"#(\d+)", full)})
+        result = ExtractionResult(
+            completed=[ExtractedCompletion(task_id=i, task_title=f"Aufgabe {i}") for i in ids]
+        )
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args=result.model_dump_json())]
+        )
+
+    current = ExtractionResult(
+        completed=[
+            ExtractedCompletion(task_id=7, task_title="Angebot Kindergarten absenden"),
+            ExtractedCompletion(task_id=8, task_title="Sabine zurückrufen"),
+        ]
+    )
+
+    with patch("kollege.agent.build_model", return_value=FunctionModel(fn)):
+        revised = run_revision(
+            original_transcript="Langes Update mit mehreren erledigten Aufgaben.",
+            current_result=current,
+            correction="Du hast eine vergessen: Aufgabe #9 ist auch erledigt.",
+            settings=Settings(),
+        )
+
+    assert {c.task_id for c in revised.completed} == {7, 8, 9}

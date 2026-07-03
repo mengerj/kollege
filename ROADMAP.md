@@ -12,31 +12,26 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.5 — restliche Live-Edge-Cases (interaktiv), 8.18 + 8.19 validieren.**
+**Schritt 8.21 — Live-Debugging-Observability (LLM-Traces + lückenloses Verlaufs-Log).**
 
-**Schritt 8.18 erledigt:** Extraktion **zweistufig** — zweiter Durchgang
-(`run_gap_check`) füllt Lücken (Frist/Projektzuordnung) und trägt Übersehenes nach;
-Datumsanzeige deutsch (`format_date_de`, „Do. 2. Juli 2026"), intern ISO.
+**Schritt 8.20 erledigt** (Bugfix aus Live-Test 2026-07-02): Der Korrektur-Lauf
+verlor bereits erkannte **Erledigungen**, weil `_format_result_for_revision` dem LLM
+die `completed`-Einträge des bisherigen Vorschlags nicht zeigte. Formatter
+vereinheitlicht (`_format_result_for_prompt`, zeigt jetzt in beiden Läufen auch
+`completed`/`edits`), Revisions-Prompt geschärft („Unbetroffene Einträge unverändert
+übernehmen"), Regression durch Prompt-Test, Verhaltens-Test (treues FunctionModel),
+Orchestrator-Test und ein neues Benchmark-Fixture abgesichert. 294 Tests grün.
 
-**Schritt 8.19 erledigt** (aus Live-Test): **bestehende Aufgaben bearbeiten** — neue
-Notiz/Rückfrage-Antwort kann Titel/Frist/Projekt einer offenen Aufgabe ändern
-(`ExtractedTaskEdit`, `repo.update_task`, „✏️ Aufgabe ändern"-Vorschlag, Log-
-Konsistenz). Nebenbei behoben: `run_revision`/`run_clarification_response` reichen
-jetzt den Offene-Aufgaben-Kontext mit (sonst fehlten nach der Rückfrage die IDs).
+**Konkret als Nächstes (8.21):** Die 8.20-Analyse war nur per Code-Rekonstruktion
+möglich, weil **nichts** vom LLM-Verkehr aufgezeichnet wird (keine Prompts, keine
+Tool-Calls; die INFO-Zeilen zählten `completed`/`edits` nicht mit). Schritt 8.21
+baut opt-in-LLM-Traces (`KOLLEGE_TRACE=1`, JSONL), schließt die Logging-Lücken und
+liefert einen Trace-Viewer — Details/DoD unten.
 
-**Konkret als Nächstes:** interaktiver Live-Test — prüfen, ob (a) der zweite
-Durchgang die zuvor nötigen Korrekturen vermeidet und nicht zu geschwätzig wird, und
-(b) der Edit-Pfad im Alltag greift (auch der zuvor gescheiterte #6-Fall). Auffällig-
-keiten ins Eval-Set (8.10). Danach Stufe B für **Kontakte** (Umbenennung + Merge)
-oder **8.12** (EU-LLM-Anbieter, rein automatisierbar).
-
-**Automatisierbare Alternative (falls keine Nutzerin verfügbar):** **Schritt 8.12**
-— DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden (reine Code-/Config-Arbeit,
-`build_model()` erweitern, Benchmark 8.11 nutzen). Details/DoD weiter unten.
-
-Der priorisierte Block **8.14 → 8.15 → 8.16 → 8.17** aus dem Live-Test
-(mistral3.1-medium via OpenRouter) ist abgeschlossen; der Schreib-/Abfragepfad ist
-stabil, 8.18 hat die Extraktionsqualität darauf aufgesetzt verbessert.
+**Danach:** Schritt 8.5 (restliche Live-Edge-Cases) mit der neuen Observability
+wiederholen — inkl. Validierung von 8.18/8.19 und dem 8.20-Szenario live. Anschließend
+Stufe B für **Kontakte** (Umbenennung + Merge) oder **8.12** (EU-LLM-Anbieter,
+rein automatisierbar, falls keine Nutzerin verfügbar).
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -68,7 +63,7 @@ stabil, 8.18 hat die Extraktionsqualität darauf aufgesetzt verbessert.
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
 | 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
-| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ▶ nächster Schritt |
+| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen |
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
 | 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ✅ erledigt |
 | 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ✅ erledigt |
@@ -76,6 +71,8 @@ stabil, 8.18 hat die Extraktionsqualität darauf aufgesetzt verbessert.
 | 8.17 | Erledigungen aus Freitext erkennen & abgleichen | 1.5 | ✅ erledigt |
 | 8.18 | Zwei-Durchgang-Extraktion + deutsche Datumsanzeige | 1.5 | ✅ erledigt |
 | 8.19 | Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben) | 1.5 | ✅ erledigt |
+| 8.20 | Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix) | 1.5 | ✅ erledigt |
+| 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ▶ nächster Schritt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -742,6 +739,183 @@ unverändert, unbekannte ID → `ValueError`, Status bleibt offen); `persist_res
 ändert Titel + schreibt Log-Korrektur; Orchestrator: Edit-Notiz → „ändern"-Vorschlag
 → Bestätigung ändert die DB; Rückfrage-Antwort-Lauf reicht `open_tasks_context` durch.
 289 Tests grün, `ruff`/`mypy --strict` sauber.
+
+### Schritt 8.20 — Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix aus Live-Test) ✅
+
+**Vorfall (Live-Test 2026-07-02, `mistral-medium-3.1` via OpenRouter).** Lange
+Sprachnotiz mit neuen Aufgaben und **drei** Erledigungs-Aussagen:
+1. Erster Vorschlag: zwei der drei Erledigungen erkannt (plus die neuen Aufgaben).
+2. Zitat-Antwort *„prüf, ob noch eine Aufgabe erledigt wurde"* → **derselbe**
+   Vorschlag kam zurück.
+3. Zitat-Antwort mit **expliziter Nennung** der fehlenden Erledigung → der
+   revidierte Vorschlag enthielt nur noch diese eine — **die zwei zuvor erkannten
+   Erledigungen waren verschwunden**.
+
+**Ursache (im Code deterministisch belegbar).**
+[`_format_result_for_revision`](src/kollege/agent/__init__.py) rendert den
+„Bisherigen Vorschlag" für den `[KORREKTUR-LAUF]`-Prompt aus Kontakten, Aufgaben,
+Projekt-Updates und Edits — **aber nicht aus `result.completed`**. Das LLM hat die
+bereits erkannten Erledigungen im Korrektur-Lauf also **nie gesehen**. Da jeder
+Korrektur-Lauf ein frischer One-Shot ist, der den gesamten Vorschlag neu erzeugt
+(kein Chat-Gedächtnis), sind nicht gezeigte Einträge de facto gelöscht — es sei
+denn, das Modell leitet sie zufällig erneut aus dem Ursprungstranskript ab. Genau
+das erklärt die Nicht-Determinismen: In Runde 2 hat es die Erledigungen neu
+abgeleitet (gleicher Vorschlag), in Runde 3 nicht (Einträge weg). Die
+Schwesterfunktion [`_format_result_for_gap_check`](src/kollege/agent/__init__.py)
+listet `completed` korrekt — beim Nachrüsten von 8.17/8.19 wurde nur die
+Revisions-Variante vergessen. Runde 2 scheiterte zusätzlich strukturell: eine
+Meta-Aufforderung ohne neue Information trifft auf exakt dieselben Inputs wie
+Lauf 1 (siehe „Bewusst offen" unten).
+
+**Umsetzung (erledigt).**
+- **Formatter vereinheitlicht:** `_format_result_for_prompt(result, *, mark_gaps)`
+  in [`agent/__init__.py`](src/kollege/agent/__init__.py) ersetzt die getrennten
+  `_format_result_for_revision`/`_format_result_for_gap_check` (eine Quelle der
+  Wahrheit). Beide Läufe listen jetzt **alle** Kategorien inkl. `completed`
+  („Erledigung: #id Titel") und `edits` (mit Änderungsdetails via
+  `_format_edit_changes`); `mark_gaps=True` behält die explizite Lücken-Markierung
+  („OHNE Fälligkeitsdatum"/„OHNE Projektzuordnung") des Gap-Checks bei.
+- **Revisions-Prompt geschärft** ([`run_revision`](src/kollege/agent/__init__.py)):
+  „Übernimm alle Einträge des bisherigen Vorschlags unverändert, die von der
+  Korrektur nicht betroffen sind — auch bereits erkannte Erledigungen und
+  Änderungen. Entferne einen Eintrag nur, wenn die Korrektur das ausdrücklich
+  verlangt."
+- **Regression abgesichert (test-driven):**
+  - Prompt-Inspektions-Test (`test_run_revision_prompt_includes_completed_and_edits`):
+    `completed` + Edit-Zieltitel + Übernahme-Anweisung im Revisions-Prompt sichtbar.
+  - Verhaltens-Test (`test_run_revision_prompt_completed_survive_reflecting_model`):
+    ein „treues" FunctionModel, das nur die im Prompt sichtbaren IDs zurückgibt,
+    behält dank des Fixes die zwei alten Erledigungen + die neue.
+  - Orchestrator-Test (`test_revision_keeps_prior_completions`): echter
+    Revisions-Pfad über Quote-Reply → Pending-Result behält `{6, 7}` und ergänzt `8`.
+  - **Benchmark-Fixture** (Wachstumspfad 8.11):
+    `tests/fixtures/eval_revision/03_erledigungen_bleiben_erhalten.json` (Vorfall:
+    2 erkannte + 1 nachgereichte Erledigung → erwartet alle 3). Deklarativer Scorer
+    um `min_completed` + `must_contain_task_ids` erweitert (je ein optionaler Key +
+    ein Zweig).
+
+**Bewusst offen / nicht im Scope (Entscheid Nutzerin 2026-07-02).**
+- **Deterministischer Merge** („verlorene Einträge automatisch behalten"):
+  zurückgestellt. Kernproblem: das System kann ohne LLM **nicht wissen**, welcher
+  Teil des Vorschlags von der Korrektur betroffen war — ein stumpfer Merge würde
+  auch **bewusste Löschungen** („Nummer 2 streichen") wieder hineinmergen.
+  Leichtgewichtige Alternative, falls der Prompt-Fix live nicht reicht:
+  **sichtbarer Diff** im revidierten Vorschlag („Nicht mehr enthalten: …" —
+  deterministisch berechenbar aus altem vs. neuem Result), sodass die Nutzerin
+  Verluste sofort sieht und per weiterer Korrektur zurückholen kann
+  (Human-in-the-loop statt Raten). Entscheidung nach Live-Erfahrung mit dem Fix.
+- **„Prüf nochmal"-Meta-Korrekturen** auf `run_gap_check` routen (semantisch ist
+  das ein erneuter Lücken-Check, kein Revisions-Lauf): zurückgestellt, erst
+  angehen, falls das Bedürfnis wieder auftaucht.
+
+**DoD.** ✅
+- ✅ Revisions-Prompt zeigt `completed` (und Edit-Details) des bisherigen Vorschlags;
+  Übernahme-Anweisung ergänzt.
+- ✅ Prompt-Test + Verhaltens-Test + Orchestrator-Regressionstest grün; neues
+  Revisions-Fixture reproduziert die Fehlerklasse messbar (Scorer um `min_completed`/
+  `must_contain_task_ids` erweitert, via `scripts/benchmark_models.py` nutzbar).
+- ✅ CI-Kette grün (`ruff` / `mypy --strict` / `pytest`, 294 Tests).
+
+### Schritt 8.21 — Live-Debugging-Observability: LLM-Traces + lückenloses Verlaufs-Log ⬜
+
+**Motiv (aus der 8.20-Analyse).** Der Vorfall war **nicht aus Aufzeichnungen
+rekonstruierbar**, sondern nur durch Code-Lektüre: Es gibt kein Protokoll, welchen
+Kontext das LLM bekam, welche Tools es (mit welchen Argumenten) aufrief, was es
+zurückgab, ob Primär- oder Fallback-Pfad lief. Dazu Lücken im normalen Logging:
+die INFO-Zeilen „Extraktion:/Korrektur-Lauf: %d Kontakt(e), %d Aufgabe(n), %d
+Projekt-Update(s)" zählen **`completed` und `edits` nicht mit** (genau die
+Kategorie des Vorfalls war unsichtbar), und der Bot-Output ging nur an das
+Terminal (kein `kollege.log` beim Vordergrund-Start). Ziel: Eine Live-Testsession
+soll im Nachhinein vier Fragen vollständig beantworten:
+1. **Was kam an und wie wurde geroutet?** (Text/Audio/Reaktion; Command /
+   Bestätigung / Korrektur / Rückfrage-Antwort / neue Notiz)
+2. **Welchen exakten Kontext bekam das LLM je Lauf?** (System-Prompts,
+   Kontext-Blöcke, zusammengesetzter Prompt)
+3. **Welche Tool-Calls mit welchen Argumenten und Rückgaben?** (inkl. Retries und
+   Primär-/Fallback-Umschaltung)
+4. **Was wurde vorgeschlagen, bestätigt, persistiert?**
+
+**Baustein 1 — Trace-Modul `src/kollege/trace.py` (opt-in, Volltext).**
+- `TraceWriter`-Protocol mit `NoopTraceWriter` (Default) und `JsonlTraceWriter`:
+  eine Datei pro Tag (`data/traces/2026-07-02.jsonl`, append-only), ein
+  JSON-Objekt pro Zeile: `ts` (ISO, UTC), `event`, `run_id`, `payload`.
+- **Konfiguration:** `Settings.trace_enabled` (env `KOLLEGE_TRACE`, Default aus)
+  und `Settings.trace_dir` (Default `data/traces`). **Datensparsamkeit
+  (Prinzip 5):** Traces enthalten Volltexte (Transkripte, Prompts) → nur für
+  Debugging-Phasen aktivieren; `data/` ist bereits gitignored; Lösch-Hinweis in
+  der Doku. Keine Audio-Dateien, nur Text.
+- **LLM-Lauf-Erfassung in [`run_extraction`](src/kollege/agent/__init__.py)** —
+  dem Trichter, durch den alle vier Laufarten gehen. Neuer expliziter Parameter
+  `kind` (`extraktion | gap_check | revision | clarification_response`), von den
+  Wrappern (`run_gap_check`/`run_revision`/`run_clarification_response`)
+  durchgereicht. Pro Lauf ins Trace:
+  - `kind`, Modell + Provider, Latenz, Primär- oder Fallback-Pfad,
+    Token-`usage` (liefert pydantic-ai mit).
+  - Der **komplette augmentierte User-Prompt** (Bekannte-Namen-Block,
+    Offene-Aufgaben-Block, `[NOTIZ]`/`[KORREKTUR-LAUF]`/…-Prompt).
+  - **Alle Messages des Laufs** via `result.all_messages()`, serialisiert mit
+    `pydantic_ai.messages.ModelMessagesTypeAdapter` → enthält System-Prompts,
+    jeden **Tool-Call mit Argumenten**, jede Tool-Rückgabe, Retries und die
+    finale Antwort. **Wichtig für Fehlerfälle:** Läufe, die mit
+    `UnexpectedModelBehavior` o. ä. abbrechen, mit
+    `pydantic_ai.capture_run_messages()` umschließen, damit gerade die
+    **gescheiterten** Läufe (die interessanten) ihre Messages ins Trace schreiben.
+  - Exceptions mit Typ + Text als eigenes Event.
+- **Orchestrator-Ereignisse** (gleiche Datei — macht den Faden end-to-end lesbar):
+  `message_received` (Art: Text/Audio/Reaktion, Transkript), `routing`
+  (Command/ja/nein/Auswahl/Korrektur/Rückfrage-Antwort/neue Notiz),
+  `proposal_sent` (formatierter Vorschlagstext), `clarification_sent`,
+  `confirmed` (Indizes)/`rejected`, `persisted` (Anzahl + Item-Labels), `error`.
+  Übergabe des Writers an den `Orchestrator`-Konstruktor (Default `Noop` — Tests
+  und Bestand bleiben unberührt).
+
+**Baustein 2 — Dauer-Logging-Lücken schließen (immer an, inhaltsfrei).**
+- INFO-Zeilen in [`orchestrator.py`](src/kollege/orchestrator.py) um
+  `completed`/`edits`-Zähler ergänzen (Extraktion, Rückfrage-Antwort,
+  Korrektur-Lauf — alle drei Stellen).
+- [`scripts/run_signal.py`](scripts/run_signal.py): zusätzlich zum Konsolen-Handler
+  einen `FileHandler` auf `kollege.log` konfigurieren, damit der Verlauf auch beim
+  Vordergrund-Start ohne Shell-Redirect persistiert (der Vorfalls-Prozess lief
+  ohne Redirect → Log weg beim Schließen des Terminals).
+- Klare Trennung dokumentieren: **Dauer-Log = inhaltsfrei** (Datensparsamkeit),
+  **Trace = opt-in mit Volltext** für Debugging-Phasen.
+
+**Baustein 3 — Trace-Viewer `scripts/show_trace.py`.**
+- CLI: `--date 2026-07-02` (Default: heute), `--last N` (letzte N Läufe),
+  `--run <run_id>` (ein Lauf komplett), `--full` (Prompts ungekürzt).
+- Menschenlesbare Ausgabe: chronologische Ereignisliste; pro LLM-Lauf Kind,
+  Modell, Kontext-Blöcke, Tool-Call-Sequenz mit Argumenten → Rückgaben, finales
+  `ExtractionResult`, Tokens/Latenz/Pfad. Zweck: in einer Live-Session in
+  Sekunden beantworten, *warum* ein Eintrag fehlte oder verschwand.
+- [`docs/live-testing-guide.md`](docs/live-testing-guide.md) §3 um Abschnitt
+  „e) LLM-Traces" erweitern (Aktivieren, Anschauen, Löschen).
+
+**Abwägungen.**
+- **Pydantic Logfire** (von pydantic-ai nativ unterstützt) böte UI/Spans, ist aber
+  ein Cloud-Dienst → für Volltext-Traces gegen lokal-first/Datensparsamkeit.
+  Lokale JSONL zuerst; Logfire-Selfhost/OTel bei VPS-Betrieb (Schritt 16) neu
+  bewerten.
+- **Warum nicht einfach mehr INFO-Logging?** Prompts und Tool-Argumente gehören
+  nicht in ein dauerhaft aktives Log. Die Zweiteilung (inhaltsfreies Dauer-Log +
+  opt-in-Trace) hält Prinzip 5 ein und liefert trotzdem volle Tiefe, wenn man sie
+  braucht.
+
+**Vorgehen (test-driven, ohne LLM im CI).**
+- `JsonlTraceWriter` gegen `tmp_path`: append-only, valides JSONL, Tagesdatei.
+- Serialisierung der Lauf-Messages mit `FunctionModel`: Tool-Call-Argumente und
+  finales Result landen im Trace; Fehlerpfad mit `capture_run_messages` getestet.
+- Orchestrator-Events mit `MemoryChannel` + `JsonlTraceWriter` (voller Faden:
+  Nachricht → Vorschlag → Korrektur → Bestätigung → persisted).
+- Viewer: reine Parse-/Format-Funktionen unit-getestet.
+
+**DoD.**
+- Mit `KOLLEGE_TRACE=1` erzeugt der Ablauf Nachricht → Vorschlag → Korrektur →
+  Bestätigung eine Trace-Datei, aus der `scripts/show_trace.py` den kompletten
+  Faden lesbar rendert — inkl. exaktem LLM-Kontext und allen Tool-Calls je Lauf,
+  auch bei gescheiterten Läufen.
+- INFO-Zeilen zählen `completed`/`edits` mit; `kollege.log` wird auch ohne
+  Shell-Redirect geschrieben.
+- Guide §3e dokumentiert Nutzung + Datensparsamkeits-Hinweis; CI-Kette grün.
 
 ---
 

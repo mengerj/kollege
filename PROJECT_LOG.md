@@ -5,6 +5,54 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-03 — Schritt 8.20 — Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix)
+
+**Auslöser (Live-Test 2026-07-02, `mistral-medium-3.1` via OpenRouter).** Eine lange
+Sprachnotiz enthielt neue Aufgaben **und** drei Erledigungen. Verlauf: (1) Erster
+Vorschlag erkannte zwei der drei Erledigungen. (2) Zitat-Antwort „prüf nochmal, ob
+noch eine erledigt wurde" → **derselbe** Vorschlag. (3) Zitat-Antwort mit expliziter
+Nennung der fehlenden Erledigung → revidierter Vorschlag enthielt **nur noch diese
+eine** — die zwei zuvor erkannten Erledigungen waren verschwunden.
+
+**Diagnose (deterministisch aus dem Code, nicht aus Logs — es gibt keine).**
+`_format_result_for_revision` rendert den „Bisherigen Vorschlag" für den
+`[KORREKTUR-LAUF]`-Prompt aus Kontakten/Aufgaben/Projekt-Updates/Edits — **aber nicht
+aus `result.completed`**. Da jeder Korrektur-Lauf ein frischer One-Shot ohne
+Chat-Gedächtnis ist, der den ganzen Vorschlag neu erzeugt, sind nicht gezeigte
+Einträge de facto gelöscht (außer das Modell leitet sie zufällig neu aus dem
+Transkript ab — genau das erklärt Runde 2 „gleicher Vorschlag" vs. Runde 3 „weg").
+Die Schwesterfunktion `_format_result_for_gap_check` listet `completed` korrekt —
+beim Nachrüsten von 8.17/8.19 wurde nur die Revisions-Variante vergessen.
+
+**Umsetzung.**
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): beide Formatter zu einer
+  Quelle der Wahrheit vereinheitlicht — `_format_result_for_prompt(result, *,
+  mark_gaps)`. Beide Läufe zeigen jetzt **alle** Kategorien inkl. `completed`
+  („Erledigung: #id Titel") und `edits` (mit Änderungsdetails via
+  `_format_edit_changes`); `mark_gaps=True` behält die Lücken-Markierung
+  („OHNE Fälligkeitsdatum") des Gap-Checks. Revisions-Prompt geschärft: unbetroffene
+  Einträge (auch Erledigungen/Änderungen) unverändert übernehmen, nur auf
+  ausdrückliche Aufforderung entfernen.
+- [`eval/`](src/kollege/eval/): deklarativer Scorer um `min_completed` +
+  `must_contain_task_ids` erweitert (je ein optionaler Fixture-Key + ein Zweig).
+
+**Tests.** `test_run_revision_prompt_includes_completed_and_edits` (Prompt-Inspektion),
+`test_run_revision_prompt_completed_survive_reflecting_model` (treues FunctionModel
+behält alte + neue Erledigung), `test_revision_keeps_prior_completions` (echter
+Revisions-Pfad über den Orchestrator) und Benchmark-Fixture
+`tests/fixtures/eval_revision/03_erledigungen_bleiben_erhalten.json`. 294 Tests grün,
+`ruff`/`mypy --strict` sauber.
+
+**Offen / bewusst zurückgestellt (Nutzerin-Entscheid).** Deterministischer Merge
+verlorener Einträge zurückgestellt — das System kann ohne LLM nicht wissen, welcher
+Teil des Vorschlags von der Korrektur betroffen war (ein stumpfer Merge würde
+bewusste Löschungen rückgängig machen). Leichte Alternative bei Bedarf: sichtbarer
+Diff („Nicht mehr enthalten: …") im revidierten Vorschlag. „Prüf nochmal"-
+Meta-Korrekturen auf `run_gap_check` routen: ebenfalls zurückgestellt. Beobachtbar-
+keit (fehlende LLM-Traces) war der eigentliche Engpass der Analyse → **Schritt 8.21**.
+
+---
+
 ## 2026-07-02 — Schritt 8.19 — Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben)
 
 **Auslöser (Live-Test, Nutzerin).** Über `/offen` fiel auf, dass Aufgabe #6 „Bad

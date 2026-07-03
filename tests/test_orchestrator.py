@@ -1195,6 +1195,58 @@ def test_revision_after_resolved_clarification_carries_qa_history(
     ]
 
 
+def test_revision_keeps_prior_completions(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Regression (Schritt 8.20): Eine Korrektur, die eine Erledigung ergänzt, lässt die
+    bereits im Vorschlag erkannten Erledigungen unangetastet.
+
+    Statt ``run_revision`` zu mocken, läuft hier der echte Revisions-Pfad gegen ein
+    FunctionModel, das nur die im Prompt sichtbaren Aufgaben-IDs zurückgibt ('treues'
+    Modell). Ohne den Fix fehlten die bereits erkannten Erledigungen im Prompt und
+    gingen verloren; mit dem Fix stehen sie dort und bleiben erhalten.
+    """
+    import re
+
+    from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    from kollege.models import ExtractedCompletion
+
+    # Vorschlag mit zwei erkannten Erledigungen in den Pending-State bringen.
+    primed = ExtractionResult(
+        completed=[
+            ExtractedCompletion(task_id=6, task_title="Plan finalisieren"),
+            ExtractedCompletion(task_id=7, task_title="Stauden prüfen"),
+        ]
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=primed):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Mehrere Aufgaben erledigt."))
+    channel.sent.clear()
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        full = " ".join(
+            str(part.content) for msg in messages for part in msg.parts if hasattr(part, "content")
+        )
+        ids = sorted({int(n) for n in re.findall(r"#(\d+)", full)})
+        result = ExtractionResult(
+            completed=[ExtractedCompletion(task_id=i, task_title=f"Aufgabe {i}") for i in ids]
+        )
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args=result.model_dump_json())]
+        )
+
+    with patch("kollege.agent.build_model", return_value=FunctionModel(fn)):
+        orc.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Du hast eine vergessen: Aufgabe #8 ist auch erledigt.",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+
+    assert SENDER in orc._pending
+    assert {c.task_id for c in orc._pending[SENDER].result.completed} == {6, 7, 8}
+
+
 # ---------------------------------------------------------------------------
 # Deutsche Slash-Commands (Schritt 8.15) — deterministische DB-Abfragen ohne LLM
 # ---------------------------------------------------------------------------
