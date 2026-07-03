@@ -3,6 +3,24 @@
 Anweisungen für KI-gestützte Entwicklungssessions an diesem Projekt. Vor jeder
 Session lesen. Bei Konflikt gewinnen die **Designprinzipien**.
 
+## Session-Start & Kontext-Ökonomie (zuerst lesen)
+
+Die Doku wächst; **nicht** wahllos ganze Dateien in den Kontext ziehen. Lese-
+Reihenfolge zu Session-Beginn, nur so tief wie nötig:
+
+1. **[ROADMAP.md](ROADMAP.md)** — nur „▶ NÄCHSTER SCHRITT" + Statustabelle. Enthält
+   bewusst **nur offene/laufende** Schritte im Detail.
+2. Den Detailabschnitt **genau des einen** anstehenden Schritts.
+3. Bei Bedarf **[PROJECT_LOG.md](PROJECT_LOG.md)** (neuester Eintrag oben) für den
+   letzten Stand.
+4. Historie/DoD **erledigter** Schritte nur bei Bedarf aus
+   **[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md)** (per Grep gezielt, nicht ganz laden).
+
+Beim gezielten Nachschlagen in großen Dateien `offset`/`limit` oder Grep nutzen
+statt sie komplett zu lesen. **Rollen der Dateien** (keine Redundanz erzeugen):
+Roadmap = „was kommt", Log = „was geschah" (chronologisch), Archiv = Detail-
+Begründung erledigter Schritte.
+
 ## Was Kollege ist
 
 Persönlicher KI-Projektassistent für eine selbstständige Landschaftsarchitektin.
@@ -75,7 +93,10 @@ Jede Session arbeitet auf einem **Feature-Branch**, nie direkt auf `main`:
 1. **[PROJECT_LOG.md](PROJECT_LOG.md)** ergänzen: Datum, was getan, Entscheidungen,
    offene Punkte (neuester Eintrag oben).
 2. **[ROADMAP.md](ROADMAP.md)** aktualisieren: Status-Tabelle + Abschnitt
-   **„▶ NÄCHSTER SCHRITT"** auf den nächsten konkreten Schritt setzen.
+   **„▶ NÄCHSTER SCHRITT"** auf den nächsten konkreten Schritt setzen. Wird ein
+   Schritt fertig (✅), seinen **Detailblock nach [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md)
+   verschieben** — in der Roadmap bleibt nur die Tabellenzeile. So bleibt die aktive
+   Roadmap schlank (Kontext-Ökonomie, siehe oben).
 3. Sicherstellen, dass die CI-Kette grün ist.
 4. Commit auf Feature-Branch, PR öffnen (siehe Git-Workflow oben).
 

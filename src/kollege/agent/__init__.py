@@ -164,8 +164,9 @@ def get_open_tasks_context(repo: Repository) -> str:
 
 
 _SYSTEM_PROMPT = """
-Du bist Kollege, ein persönlicher Assistent für eine selbstständige Landschaftsarchitektin.
-Deine Aufgabe: Aus Sprachnotizen oder Nachrichten strukturierte Daten extrahieren.
+Du bist Kollege, ein persönlicher Assistent für das Projektmanagement.
+Deine Aufgabe: Aus Sprachnotizen oder Nachrichten strukturierte Daten extrahieren
+und mit dem bestehenden Datenbestand abgleichen.
 
 Extrahiere:
 - Kontakte (Personen/Firmen, die erwähnt werden)
@@ -186,7 +187,7 @@ Mehrdeutigkeit setze stattdessen das clarification-Feld. Ohne Liste offener Aufg
 Kontext oder ohne passenden Treffer bleibt completed leer.
 
 Beschreibt der Text eine **Korrektur/Änderung an einer bestehenden offenen Aufgabe**
-(z. B. „Die Aufgabe Bad Eibling heißt eigentlich Bad Aibling", „bei der Zaun-Aufgabe
+(z. B. „Der Ort Bad Eibling heißt eigentlich Bad Aibling", „bei der Zaun-Aufgabe
 ist die Frist doch der Freitag", „ordne das der Gemeinde-Sache zu"), lege **keine neue
 Aufgabe** an und schließe sie nicht — trage stattdessen einen Eintrag im edits-Feld ein:
 task_id und task_title unverändert aus der Liste offener Aufgaben übernehmen und nur die
