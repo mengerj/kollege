@@ -5,6 +5,38 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-03 — Trace-Analyse + Roadmap-Verschlankung (Doku, automatische Session)
+
+**Auslöser.** Erste echte LLM-Traces (8.21) analysiert
+(`data/traces/2026-07-03.jsonl`, 4 Runs, `mistral-medium-3.1`, alle Primär-Pfad).
+
+**Erkenntnisse (Token/Kontext).**
+- **Gap-Check (2. Durchgang) verdoppelt den Kontext mit Null-Effekt:** sendet
+  `[BEKANNTE NAMEN]`+`[OFFENE AUFGABEN]` erneut *und* listet dieselben Aufgaben im
+  „Erster Vorschlag" nochmal — 3107 → **3662** Input-Tokens, Ergebnis **identisch**.
+  Läuft aktuell bei *jeder* Notiz. → neuer **Schritt 8.23** (Gating + Deduplizierung).
+- **Instruktionen mehrfach im Kontext** (`completed`/`edits` im System-Prompt *und*
+  im User-Block; `clarification` dreifach). → ebenfalls 8.23.
+- **Löschen ging stumm ins Leere:** „Lösche alle Kontakte/Projekte" → Rückfrage →
+  „Alles" → **leeres** Ergebnis, keine Aktion (es gibt keine Lösch-Funktion). →
+  neuer **Schritt 8.22** (deterministische Lösch-Commands mit Bestätigung).
+
+**Doku-Umbau (dieser Commit).**
+- **8.12 → 9.1** verschoben (Phase 2; EU-LLM-Anbindung aktuell nicht nah), nächster
+  Schritt ist jetzt **8.22**.
+- **[ROADMAP.md](ROADMAP.md) verschlankt: 1080 → ~360 Zeilen.** Detailblöcke aller
+  **erledigten** Schritte nach **[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md)** (neu)
+  ausgelagert; Roadmap führt sie nur noch als Tabellenzeile. Grund: Kontext-
+  Ökonomie — frische Sessions sollen mit wenig Tokens wissen, was zu tun ist.
+- **[CLAUDE.md](CLAUDE.md):** neue Sektion „Session-Start & Kontext-Ökonomie"
+  (Lese-Reihenfolge, gezieltes Grep statt Volllesen, Rollenteilung Roadmap/Log/
+  Archiv); Abschluss-Ritual ergänzt (erledigte Detailblöcke ins Archiv verschieben).
+
+**Offen/zu prüfen (Nutzer).** Tabelleninkonsistenz **8.8**: Statustabelle sagt
+✅, Detail-Heading sagt ⬜ (Stub ohne abgehakte DoD) — nicht automatisch geändert.
+
+---
+
 ## 2026-07-03 — Schritt 8.21 — Live-Debugging-Observability (LLM-Traces + Verlaufs-Log, automatische Session)
 
 **Auslöser.** Die 8.20-Bugfix-Analyse (siehe Eintrag darunter) war nur per
