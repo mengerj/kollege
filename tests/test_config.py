@@ -20,3 +20,19 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     s = Settings(_env_file=None)
     assert s.llm_provider is LLMProvider.ANTHROPIC
     assert s.llm_model == "claude-sonnet-4-6"
+
+
+def test_trace_disabled_by_default() -> None:
+    s = Settings(_env_file=None)
+    assert s.trace_enabled is False
+    assert s.trace_dir == "data/traces"
+
+
+def test_trace_enabled_via_short_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``KOLLEGE_TRACE=1`` aktiviert Traces (Schritt 8.21) — kurzer Name, keine
+    Präfix-Verdopplung zu ``KOLLEGE_TRACE_ENABLED``."""
+    monkeypatch.setenv("KOLLEGE_TRACE", "1")
+    monkeypatch.setenv("KOLLEGE_TRACE_DIR", "/tmp/traces")
+    s = Settings(_env_file=None)
+    assert s.trace_enabled is True
+    assert s.trace_dir == "/tmp/traces"

@@ -118,6 +118,43 @@ Ein gesundes Empfangsmuster ist **eine** lang offene `GET /v1/receive/…`-Zeile
 Viele kurze `GET …`-Zeilen im Sekundentakt = die alte Batch-Verbindung (Bug,
 siehe §5) — sollte nicht mehr vorkommen.
 
+### e) LLM-Traces (Schritt 8.21)
+
+Das normale `kollege.log` ist **inhaltsfrei** (Datensparsamkeit, Prinzip 5) —
+es zeigt *dass* extrahiert wurde, nicht *was* das LLM gesehen und getan hat
+(welcher Prompt, welche Tool-Calls, Primär- oder Fallback-Pfad). Für tiefes
+Live-Debugging (z. B. „warum ist eine Erledigung im Vorschlag verschwunden?")
+gibt es einen **opt-in Volltext-Trace**.
+
+**Aktivieren** (vor dem Start von `run_signal.py`, z. B. in `.env`):
+
+```bash
+KOLLEGE_TRACE=1
+# optional, Default: data/traces
+KOLLEGE_TRACE_DIR=data/traces
+```
+
+Jedes Ereignis (Nachricht empfangen, Routing-Entscheidung, jeder LLM-Lauf mit
+komplettem Prompt + Tool-Calls + Tokens/Latenz, Vorschlag/Rückfrage,
+Bestätigung/Ablehnung, Persistenz, Fehler) landet als JSON-Zeile in
+`data/traces/<datum>.jsonl` — eine `run_id` pro eingehender Nachricht gruppiert
+alle zugehörigen Ereignisse.
+
+**Anschauen:**
+
+```bash
+uv run python scripts/show_trace.py                  # heute, alle Läufe
+uv run python scripts/show_trace.py --last 3          # nur die letzten 3 Läufe
+uv run python scripts/show_trace.py --run <run_id>    # ein Lauf komplett
+uv run python scripts/show_trace.py --full            # Prompts/Inhalte ungekürzt
+```
+
+**Löschen** (Volltext, nach der Debugging-Phase wieder deaktivieren):
+
+```bash
+rm -r data/traces
+```
+
 ---
 
 ## 4. Edge-Cases zum Live-Durchspielen

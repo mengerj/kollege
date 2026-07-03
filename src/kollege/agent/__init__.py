@@ -12,9 +12,13 @@ import contextlib
 import datetime
 import logging
 import sqlite3
+import time
+from typing import Any
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, RunContext, capture_run_messages
+from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.ollama import OllamaModel
@@ -38,6 +42,7 @@ from kollege.models import (
     TaskStatus,
     WaitingOn,
 )
+from kollege.trace import NoopTraceWriter, TraceWriter, new_run_id
 
 __all__ = [
     "agent",
@@ -549,6 +554,8 @@ def run_revision(
     known_names_context: str | None = None,
     open_tasks_context: str | None = None,
     history: list[tuple[str, str]] | None = None,
+    trace: TraceWriter | None = None,
+    run_id: str | None = None,
 ) -> ExtractionResult:
     """Revidiert ein ExtractionResult anhand eines Korrekturhinweises.
 
@@ -589,6 +596,9 @@ def run_revision(
         settings,
         known_names_context=known_names_context,
         open_tasks_context=open_tasks_context,
+        kind="revision",
+        trace=trace,
+        run_id=run_id,
     )
 
 
@@ -598,6 +608,8 @@ def run_gap_check(
     settings: Settings,
     known_names_context: str | None = None,
     open_tasks_context: str | None = None,
+    trace: TraceWriter | None = None,
+    run_id: str | None = None,
 ) -> ExtractionResult:
     """Zweiter Durchgang: Lücken füllen und Übersehenes nachtragen (Schritt 8.18).
 
@@ -645,6 +657,9 @@ def run_gap_check(
         settings,
         known_names_context=known_names_context,
         open_tasks_context=open_tasks_context,
+        kind="gap_check",
+        trace=trace,
+        run_id=run_id,
     )
 
 
@@ -656,6 +671,8 @@ def run_clarification_response(
     known_names_context: str | None = None,
     open_tasks_context: str | None = None,
     history: list[tuple[str, str]] | None = None,
+    trace: TraceWriter | None = None,
+    run_id: str | None = None,
 ) -> ExtractionResult:
     """Beantwortet eine zuvor gestellte Rückfrage und extrahiert erneut.
 
@@ -698,6 +715,81 @@ def run_clarification_response(
         settings,
         known_names_context=known_names_context,
         open_tasks_context=open_tasks_context,
+        kind="clarification_response",
+        trace=trace,
+        run_id=run_id,
+    )
+
+
+def _serialize_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
+    """Alle Messages eines Laufs (System-Prompts, Tool-Calls, Retries, Antwort)
+    JSON-serialisierbar machen, für das Trace-Ereignis eines LLM-Laufs."""
+    dumped: list[dict[str, Any]] = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    return dumped
+
+
+def _trace_llm_result(
+    writer: TraceWriter,
+    run_id: str,
+    *,
+    kind: str,
+    path: str,
+    model_name: str,
+    result: AgentRunResult[Any],
+    messages: list[ModelMessage],
+    started_at: float,
+) -> None:
+    """Erfolgreichen LLM-Lauf (Primär- oder Fallback-Pfad) ins Trace schreiben."""
+    usage = result.usage
+    output = result.output
+    writer.write(
+        "llm_run_result",
+        run_id,
+        {
+            "kind": kind,
+            "path": path,
+            "model": model_name,
+            "latency_s": round(time.monotonic() - started_at, 3),
+            "usage": {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "requests": usage.requests,
+            },
+            "messages": _serialize_messages(messages),
+            "output": (
+                output.model_dump(mode="json") if isinstance(output, ExtractionResult) else output
+            ),
+        },
+    )
+
+
+def _trace_llm_error(
+    writer: TraceWriter,
+    run_id: str,
+    *,
+    kind: str,
+    path: str,
+    model_name: str,
+    exc: Exception,
+    messages: list[ModelMessage],
+    started_at: float,
+) -> None:
+    """Gescheiterten LLM-Lauf ins Trace schreiben — gerade Fehlerfälle sind die
+    interessanten (Schritt 8.11-Analyse: Primär-Pfad scheitert bei manchen Modellen
+    fast immer). ``messages`` stammt aus ``capture_run_messages()``, damit auch
+    abgebrochene Läufe ihre Tool-Calls/Retries zeigen."""
+    writer.write(
+        "llm_run_error",
+        run_id,
+        {
+            "kind": kind,
+            "path": path,
+            "model": model_name,
+            "latency_s": round(time.monotonic() - started_at, 3),
+            "exception_type": type(exc).__name__,
+            "exception_text": str(exc),
+            "messages": _serialize_messages(messages),
+        },
     )
 
 
@@ -707,6 +799,9 @@ def run_extraction(
     settings: Settings,
     known_names_context: str | None = None,
     open_tasks_context: str | None = None,
+    kind: str = "extraktion",
+    trace: TraceWriter | None = None,
+    run_id: str | None = None,
 ) -> ExtractionResult:
     """Extraktion aus Transkript synchron ausführen (Produktions-Pfad).
 
@@ -722,7 +817,15 @@ def run_extraction(
     ``build_open_tasks_context()``. Wird ebenfalls vorangestellt, damit das LLM
     Erledigungs-Aussagen im Text gegen eine bestehende Aufgabe abgleichen kann
     (Schritt 8.17).
+
+    ``kind``: Laufart für die Trace-Aufzeichnung — ``extraktion`` (Default),
+    ``gap_check``, ``revision`` oder ``clarification_response`` (gesetzt von den
+    jeweiligen Wrapper-Funktionen). ``trace``/``run_id`` (Schritt 8.21): opt-in
+    Aufzeichnung des kompletten Laufs (Kontext, Tool-Calls, Rückgaben, Fehler) für
+    Live-Debugging; ohne Writer (Default) entsteht kein zusätzlicher Overhead.
     """
+    writer = trace if trace is not None else NoopTraceWriter()
+    rid = run_id if run_id is not None else new_run_id()
     model = build_model(settings)
 
     # Bekannte Namen und offene Aufgaben dem Transkript voranstellen (nur wenn nicht leer).
@@ -731,21 +834,78 @@ def run_extraction(
     if context_blocks:
         augmented = "\n\n".join([*context_blocks, f"[NOTIZ]\n{transcript}"])
 
+    writer.write(
+        "llm_run_start",
+        rid,
+        {
+            "kind": kind,
+            "provider": str(settings.llm_provider),
+            "model": settings.llm_model,
+            "prompt": augmented,
+        },
+    )
+
     # Primär-Pfad: Tool-Output-Modus (ExtractionResult als final_result-Tool).
     # Wird von TestModel/FunctionModel im CI genutzt und von starken Modellen.
-    try:
-        result = agent.run_sync(augmented, model=model, deps=repo, retries=1)
-        return result.output
-    except (UnexpectedModelBehavior, sqlite3.DatabaseError):
-        pass
+    started_at = time.monotonic()
+    with capture_run_messages() as primary_messages:
+        try:
+            result = agent.run_sync(augmented, model=model, deps=repo, retries=1)
+            _trace_llm_result(
+                writer,
+                rid,
+                kind=kind,
+                path="primär",
+                model_name=settings.llm_model,
+                result=result,
+                messages=primary_messages,
+                started_at=started_at,
+            )
+            return result.output
+        except (UnexpectedModelBehavior, sqlite3.DatabaseError) as exc:
+            _trace_llm_error(
+                writer,
+                rid,
+                kind=kind,
+                path="primär",
+                model_name=settings.llm_model,
+                exc=exc,
+                messages=primary_messages,
+                started_at=started_at,
+            )
 
     # Fallback: Modell ruft Domain-Tools auf, aber kein final_result-Tool.
     # Frische Verbindung vermeidet Doppelschreibungen aus dem Primär-Lauf.
     fallback_conn = sqlite3.connect(":memory:", check_same_thread=False)
     fallback_repo = Repository(fallback_conn)
-    text_result = agent.run_sync(
-        augmented, model=model, deps=fallback_repo, output_type=str, retries=3
-    )
+    fallback_started_at = time.monotonic()
+    with capture_run_messages() as fallback_messages:
+        try:
+            text_result = agent.run_sync(
+                augmented, model=model, deps=fallback_repo, output_type=str, retries=3
+            )
+        except Exception as exc:
+            _trace_llm_error(
+                writer,
+                rid,
+                kind=kind,
+                path="fallback",
+                model_name=settings.llm_model,
+                exc=exc,
+                messages=fallback_messages,
+                started_at=fallback_started_at,
+            )
+            raise
+        _trace_llm_result(
+            writer,
+            rid,
+            kind=kind,
+            path="fallback",
+            model_name=settings.llm_model,
+            result=text_result,
+            messages=fallback_messages,
+            started_at=fallback_started_at,
+        )
     text_output: str = text_result.output
     # Wenn nichts gespeichert wurde, könnte es eine Rückfrage sein.
     clarification: str | None = None

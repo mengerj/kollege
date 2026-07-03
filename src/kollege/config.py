@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +45,12 @@ class Settings(BaseSettings):
     # Signal (Phase 1).
     signal_api_url: str = "http://localhost:8080"
     signal_number: str = ""
+
+    # LLM-Traces (Schritt 8.21) — opt-in, Volltext (Prompts/Tool-Calls).
+    # Datensparsamkeit (Prinzip 5): nur für Debugging-Phasen aktivieren.
+    # Kurzer Env-Name ohne Präfix-Verdopplung: KOLLEGE_TRACE=1 statt KOLLEGE_TRACE_ENABLED.
+    trace_enabled: bool = Field(default=False, validation_alias="KOLLEGE_TRACE")
+    trace_dir: str = "data/traces"
 
 
 def load_settings() -> Settings:

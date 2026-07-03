@@ -59,11 +59,20 @@ def _account_linked(base_url: str, number: str) -> bool:
 def main() -> None:
     # Logging früh konfigurieren, damit Orchestrator-Events (Eingang, Extraktion,
     # Persistenz, Fehler) im Log sichtbar sind. Datensparsam: keine Nachrichten-
-    # inhalte, nur Metadaten (Absender, Typ, Anzahl).
+    # inhalte, nur Metadaten (Absender, Typ, Anzahl). Zusätzlich zur Konsole immer
+    # auch nach kollege.log schreiben (Schritt 8.21) — beim Vordergrund-Start ohne
+    # Shell-Redirect (``uv run python scripts/run_signal.py`` ohne ``> log``) ging
+    # der Verlauf bisher beim Schließen des Terminals verloren.
+    log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    date_format = "%H:%M:%S"
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+        format=log_format,
+        datefmt=date_format,
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("kollege.log", encoding="utf-8"),
+        ],
     )
 
     settings = load_settings()
@@ -122,6 +131,11 @@ def main() -> None:
 
     # Import hier, damit die Vorab-Prüfungen ohne schwere Imports laufen.
     from kollege.orchestrator import Orchestrator
+    from kollege.trace import build_trace_writer
+
+    trace_writer = build_trace_writer(enabled=settings.trace_enabled, trace_dir=settings.trace_dir)
+    if settings.trace_enabled:
+        print(f"  Traces:      AN ({settings.trace_dir}) — Volltext, Datensparsamkeit beachten!")
 
     orchestrator = Orchestrator(
         channel=channel,
@@ -129,6 +143,7 @@ def main() -> None:
         transcriber=transcriber,
         settings=settings,
         log_dir=log_dir,
+        trace=trace_writer,
     )
 
     # Ollama-Modell vorladen, damit die erste Sprachnotiz keine Cold-Start-Latenz
