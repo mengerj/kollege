@@ -67,6 +67,14 @@ def score_result(result: ExtractionResult, expected: ExtractionExpectation) -> F
         if any(proj_kw.lower() in pu.project.lower() for pu in result.project_updates):
             hits += 1
 
+    total += 1
+    if len(result.completed) >= expected.min_completed:
+        hits += 1
+    for task_id in expected.must_contain_task_ids:
+        total += 1
+        if any(comp.task_id == task_id for comp in result.completed):
+            hits += 1
+
     over_extraction = (
         (expected.max_contacts is not None and len(result.contacts) > expected.max_contacts)
         or (expected.max_tasks is not None and len(result.tasks) > expected.max_tasks)

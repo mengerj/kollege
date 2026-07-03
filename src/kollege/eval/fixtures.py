@@ -38,6 +38,13 @@ class ExtractionExpectation(BaseModel):
     max_project_updates: int | None = None
     project_names: list[str] = Field(default_factory=list)
 
+    # Erledigungen (Schritt 8.20): ``min_completed`` fordert eine Mindestzahl
+    # geschlossener Aufgaben, ``must_contain_task_ids`` prüft, dass konkrete
+    # Aufgaben-IDs im ``completed``-Feld erhalten bleiben — deckt den Fall ab, dass
+    # ein Korrektur-Lauf zuvor erkannte Erledigungen verliert.
+    min_completed: int = 0
+    must_contain_task_ids: list[int] = Field(default_factory=list)
+
     forbidden_keywords: list[str] = Field(default_factory=list)
     must_not_be_empty: bool = False
 

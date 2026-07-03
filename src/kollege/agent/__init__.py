@@ -29,6 +29,7 @@ from kollege.models import (
     ExtractedContact,
     ExtractedProjectUpdate,
     ExtractedTask,
+    ExtractedTaskEdit,
     ExtractionResult,
     Project,
     ProjectStatus,
@@ -467,21 +468,62 @@ def _rebuild_from_repo(repo: Repository, clarification: str | None = None) -> Ex
     )
 
 
-def _format_result_for_revision(result: ExtractionResult) -> str:
-    """Aktuelles ExtractionResult als lesbaren Text für den Revisions-Prompt."""
+def _format_edit_changes(ed: ExtractedTaskEdit) -> str:
+    """Geänderte Felder einer Aufgaben-Änderung menschenlesbar zusammenfassen.
+
+    Zeigt für jedes gesetzte ``new_*``-Feld die Zieländerung, damit die Änderung
+    auch im Revisions-/Lücken-Prüfungs-Prompt vollständig sichtbar ist (Schritt 8.20).
+    """
+    parts: list[str] = []
+    if ed.new_title is not None:
+        parts.append(f"Titel → «{ed.new_title}»")
+    if ed.new_due is not None:
+        parts.append(f"Frist → {ed.new_due}")
+    if ed.new_project is not None:
+        parts.append(f"Projekt → {ed.new_project}")
+    return ", ".join(parts) if parts else "(keine Änderung)"
+
+
+def _format_result_for_prompt(result: ExtractionResult, *, mark_gaps: bool = False) -> str:
+    """Aktuelles ExtractionResult als lesbaren Text für Prompt-Läufe (Schritt 8.20).
+
+    Eine gemeinsame Quelle der Wahrheit für den Revisions-Prompt (``run_revision``,
+    Schritt 8.6) **und** den Lücken-Prüfungs-Prompt (``run_gap_check``, Schritt 8.18).
+    Beide Varianten listen **alle** Kategorien inkl. **Erledigungen** und
+    **Änderungen** — genau deren Fehlen im Revisions-Prompt ließ Korrektur-Läufe zuvor
+    bereits erkannte Erledigungen verlieren (Schritt 8.20), weil das Modell den
+    Vorschlag als frischen One-Shot neu erzeugt und nicht gezeigte Einträge de facto
+    gelöscht werden.
+
+    ``mark_gaps=True`` (Lücken-Prüfung): markiert fehlende Fälligkeit/Projekt-/
+    Kontaktzuordnung **explizit** (»OHNE Fälligkeitsdatum«), damit der zweite
+    Durchgang Lücken direkt sieht. ``mark_gaps=False`` (Korrektur-Lauf): kompakte Form.
+    """
     lines: list[str] = []
     for c in result.contacts:
         lines.append(f"  - Kontakt: {c.name}")
     for t in result.tasks:
-        due = f" (fällig: {t.due})" if t.due else ""
-        proj = f" [{t.project}]" if t.project else ""
-        lines.append(f"  - Aufgabe: {t.title}{proj}{due}")
+        if mark_gaps:
+            due = f"fällig {t.due}" if t.due else "OHNE Fälligkeitsdatum"
+            proj = f"Projekt {t.project}" if t.project else "OHNE Projektzuordnung"
+            contact = f"Kontakt {t.contact}" if t.contact else "ohne Kontakt"
+            lines.append(f"  - Aufgabe: {t.title} ({due}; {proj}; {contact})")
+        else:
+            due = f" (fällig: {t.due})" if t.due else ""
+            proj = f" [{t.project}]" if t.project else ""
+            lines.append(f"  - Aufgabe: {t.title}{proj}{due}")
     for pu in result.project_updates:
         status = f" → {pu.status}" if pu.status else ""
-        lines.append(f"  - Projekt: {pu.project}{status}")
+        label = "Projekt-Update" if mark_gaps else "Projekt"
+        lines.append(f"  - {label}: {pu.project}{status}")
+    for comp in result.completed:
+        lines.append(f"  - Erledigung: #{comp.task_id} {comp.task_title}")
     for ed in result.edits:
-        lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title}")
-    return "\n".join(lines) if lines else "  (leer)"
+        changes = _format_edit_changes(ed)
+        lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title} — {changes}")
+    if lines:
+        return "\n".join(lines)
+    return "  (nichts erkannt)" if mark_gaps else "  (leer)"
 
 
 def _format_history(history: list[tuple[str, str]] | None) -> str:
@@ -529,11 +571,15 @@ def run_revision(
         "[KORREKTUR-LAUF]\n"
         f"{_format_history(history)}"
         f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
-        f"Bisheriger Vorschlag:\n{_format_result_for_revision(current_result)}\n\n"
+        f"Bisheriger Vorschlag:\n{_format_result_for_prompt(current_result)}\n\n"
         f"Korrektur:\n{correction}\n\n"
         "Überarbeite den Vorschlag entsprechend der Korrektur. Falls die Korrektur "
         "auf einen früheren Turn dieser Interaktion verweist (z. B. »wie in der "
         "letzten Nachricht«), nutze die oben stehende Historie. "
+        "Übernimm alle Einträge des bisherigen Vorschlags unverändert, die von der "
+        "Korrektur nicht betroffen sind — auch bereits erkannte Erledigungen und "
+        "Änderungen an bestehenden Aufgaben. Entferne einen Eintrag nur, wenn die "
+        "Korrektur das ausdrücklich verlangt. "
         "Extrahiere das korrigierte Ergebnis vollständig."
     )
     tmp_repo = Repository(sqlite3.connect(":memory:", check_same_thread=False))
@@ -544,32 +590,6 @@ def run_revision(
         known_names_context=known_names_context,
         open_tasks_context=open_tasks_context,
     )
-
-
-def _format_result_for_gap_check(result: ExtractionResult) -> str:
-    """Aktuelles ExtractionResult für den Lücken-Prüfungs-Prompt formatieren.
-
-    Anders als ``_format_result_for_revision`` markiert diese Darstellung fehlende
-    Fälligkeiten/Projektzuordnungen **explizit** ("OHNE Fälligkeitsdatum"), damit
-    das Modell im zweiten Durchgang Lücken direkt sieht, und listet auch Kontakte
-    und Erledigungen mit auf.
-    """
-    lines: list[str] = []
-    for c in result.contacts:
-        lines.append(f"  - Kontakt: {c.name}")
-    for t in result.tasks:
-        due = f"fällig {t.due}" if t.due else "OHNE Fälligkeitsdatum"
-        proj = f"Projekt {t.project}" if t.project else "OHNE Projektzuordnung"
-        contact = f"Kontakt {t.contact}" if t.contact else "ohne Kontakt"
-        lines.append(f"  - Aufgabe: {t.title} ({due}; {proj}; {contact})")
-    for pu in result.project_updates:
-        status = f" → {pu.status}" if pu.status else ""
-        lines.append(f"  - Projekt-Update: {pu.project}{status}")
-    for comp in result.completed:
-        lines.append(f"  - Erledigung: #{comp.task_id} {comp.task_title}")
-    for ed in result.edits:
-        lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title}")
-    return "\n".join(lines) if lines else "  (nichts erkannt)"
 
 
 def run_gap_check(
@@ -597,10 +617,11 @@ def run_gap_check(
     zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad und
     Namensabgleich unverändert wiederverwendet werden.
     """
+    first_formatted = _format_result_for_prompt(first_result, mark_gaps=True)
     gap_prompt = (
         "[LÜCKEN-PRÜFUNG — ZWEITER DURCHGANG]\n"
         f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
-        f"Erster Extraktions-Vorschlag:\n{_format_result_for_gap_check(first_result)}\n\n"
+        f"Erster Extraktions-Vorschlag:\n{first_formatted}\n\n"
         "Prüfe den Vorschlag sorgfältig gegen das Transkript und ergänze ihn:\n"
         "1. Übersehen: Wurde eine Aufgabe, ein Kontakt, ein Projekt-Update oder eine "
         "Erledigung im Transkript genannt, fehlt aber im Vorschlag? Trage sie nach.\n"
