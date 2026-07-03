@@ -12,19 +12,17 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.22 — Löschen von Einträgen (Kontakte/Projekte/Aufgaben)** (siehe
-Details/DoD weiter unten). Direkt aus dem Live-Test 2026-07-03: eine Lösch-Bitte
-lief stumm ins Leere (keine Lösch-Funktion) — schnellster Vertrauensgewinn.
-Danach naheliegend: **8.23** (Kontext-Deduplizierung/Token-Sparen, gleiche
-Trace-Analyse) — **oder**, sobald wieder live getestet wird: **Schritt 8.5**
-(restliche Live-Edge-Cases) mit der neuen Observability (8.21), inkl. Validierung
-von 8.18/8.19 und dem 8.20-Szenario live. Danach: Stufe B für **Kontakte**
-(Umbenennung + Merge).
+**Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen)** (siehe
+Details/DoD weiter unten). Automatisch anschließbar (keine Live-Nutzerin nötig,
+Messung über den bestehenden 8.11-Benchmark). Danach, sobald wieder live getestet
+wird: **Schritt 8.5** (restliche Live-Edge-Cases) mit der neuen Observability
+(8.21), inkl. Validierung von 8.18/8.19/8.20 und dem neuen 8.22-Lösch-Flow live.
+Danach: Stufe B für **Kontakte** (Umbenennung + Merge).
 
 > **DSGVO-konforme EU-LLM-Anbindung** ist nach **Schritt 9.1** verschoben (Phase 2)
 > — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb.
 
-*Zuletzt erledigt: 8.21 (LLM-Traces + Verlaufs-Log). Was & warum steht im
+*Zuletzt erledigt: 8.22 (Löschen von Einträgen). Was & warum steht im
 [PROJECT_LOG.md](PROJECT_LOG.md); die Detail-DoD im
 [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 
@@ -67,8 +65,8 @@ von 8.18/8.19 und dem 8.20-Szenario live. Danach: Stufe B für **Kontakte**
 | 8.19 | Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben) | 1.5 | ✅ erledigt |
 | 8.20 | Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix) | 1.5 | ✅ erledigt |
 | 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
-| 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ▶ nächster Schritt |
-| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ⬜ offen |
+| 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
+| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ▶ nächster Schritt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 9.1 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 2 | 🅿️ verschoben (war 8.12) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -95,7 +93,7 @@ bestätigte Aufgaben/Kontakte zurück. Läuft komplett lokal auf dem Air.*
 
 ## Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns *(vor Phase 2)*
 
-> **Erledigte Schritte dieser Phase** (8.6, 8.7, 8.9–8.11, 8.13–8.21) stehen
+> **Erledigte Schritte dieser Phase** (8.6, 8.7, 8.9–8.11, 8.13–8.22) stehen
 > mit voller Begründung/DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md); hier nur
 > noch die **offenen** Schritte.
 
@@ -117,46 +115,6 @@ Cold-Start + Whisper + LLM erzeugen spürbare Latenz; ohne Rückmeldung wirkt da
 eigentliche Vorschlag kommt. Optional: Hinweis bei ungewöhnlich langem Lauf.
 **DoD:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt wie
 gehabt. Kein Doppel-Senden mehr aus Ungeduld.
-
-### Schritt 8.22 — Löschen von Einträgen (Kontakte/Projekte/Aufgaben) ⬜
-
-**Motiv (aus Live-Test 2026-07-03, Trace `data/traces/2026-07-03.jsonl`).** Die
-Nutzerin bat *„Lösche alle gespeicherten Kontakte und Projekte"*. Das Modell
-stellte korrekt eine Rückfrage (destruktive Aktion), auf *„Alles. Das waren bis
-jetzt nur Tests"* lief der `clarification_response`-Lauf aber ins **Leere**: ein
-komplett leeres `ExtractionResult`, **keine Aktion, keine Rückmeldung**. Ursache:
-Es existiert **keine Lösch-Funktion** — weder ein Repository-Verb noch ein
-Command noch ein Tool. Das `ExtractionResult`-Schema kann „Löschen" gar nicht
-ausdrücken, also verschwindet die Absicht kommentarlos. Das ist ein
-Vertrauensbruch (Prinzip 3/6): die Nutzerin denkt, etwas sei passiert.
-
-**Designentscheidung — deterministisch per Slash-Command, nicht über die
-LLM-Extraktion.** Löschen ist destruktiv und selten; es gehört **nicht** in den
-probabilistischen Extraktionspfad (Über-/Fehl-Löschung wäre fatal). Konsistent zu
-[Schritt 8.15](#schritt-815--query-funktionen--deutsche-slash-commands-) (Queries
-= deterministische Commands ohne LLM-Entscheidungsdruck):
-
-- **Repository (rein, TDD-fähig):** `delete_contact(id)`, `delete_project(id)`,
-  `delete_task(id)` und — für die Testdaten-Situation — `reset_all()` (löscht
-  Kontakte + Projekte + Aufgaben). Referentielle Konsequenzen bewusst festlegen
-  (Aufgaben eines gelöschten Projekts: mitlöschen vs. Projektbezug lösen).
-- **Deutsche Commands:** `/loeschen kontakt <id>`, `/loeschen projekt <id>`,
-  `/loeschen aufgabe <id>` und `/zuruecksetzen` (alles) — im bestehenden
-  Dispatcher am Anfang von `handle_message`.
-- **Zwei-Schritt-Bestätigung (Prinzip 3):** destruktive Commands zeigen erst, was
-  gelöscht wird (Anzahl + Titel/Namen) und verlangen ein **explizites 👍/„ja"**,
-  bevor gelöscht wird — nutzt die vorhandene Pending-Mechanik. Nie ohne
-  Bestätigung löschen.
-- **Der Extraktionspfad bleibt löschfrei, wird aber gesprächsfähig:** Erkennt das
-  Modell eine Lösch-/„weg damit"-Absicht, soll es **nicht** leer zurückkommen,
-  sondern per `clarification` auf den passenden Command hinweisen (z. B. „Zum
-  Löschen nutze bitte `/loeschen …` oder `/zuruecksetzen`"). Damit endet keine
-  Lösch-Absicht mehr stumm.
-
-**DoD.** Repository-Löschverben test-driven (In-Memory-SQLite, referentielle
-Regeln geprüft); Commands im Dispatcher mit Zwei-Schritt-Bestätigung getestet;
-eine Lösch-formulierte Notiz endet nicht mehr leer, sondern verweist auf den
-Command; `/hilfe` listet die neuen Commands; CI-Kette grün.
 
 ### Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) ⬜
 

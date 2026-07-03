@@ -5,6 +5,53 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-03 — Schritt 8.22 — Löschen von Einträgen (Kontakte/Projekte/Aufgaben, automatische Session)
+
+**Auslöser.** Direkt aus dem Live-Test-Trace vom selben Tag (siehe Eintrag
+darunter): eine Lösch-Bitte der Nutzerin lief stumm ins Leere, weil keine
+Lösch-Funktion existierte. Details/Motiv/Designentscheidung siehe
+[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md#schritt-822--löschen-von-einträgen-kontakteprojekteaufgaben-).
+
+**Umsetzung.**
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)):
+  `delete_contact`/`delete_project`/`delete_task`/`reset_all` + Hilfsmethoden
+  (`get_task_by_id`, `get_tasks_by_project`, `get_all_tasks`). Referentielle
+  Regel bewusst asymmetrisch: Kontakt-Löschen löst nur die Zuordnung
+  (`contact_id` → `NULL` auf Projekten/Aufgaben), Projekt-Löschen löscht seine
+  Aufgaben mit (Cascade).
+- **Dispatcher** ([`orchestrator.py`](src/kollege/orchestrator.py)):
+  `/loeschen kontakt|projekt|aufgabe <id>` und `/zuruecksetzen`, neuer dritter
+  Pending-Zustand `PendingDeletion` (exklusiv zu `PendingProposal`/
+  `PendingClarification` — je Absender genau einer). Vorschau vor jeder
+  Löschung, Bestätigung per 👍/„ja" (auch Tapback), Ablehnung per 👎/„nein";
+  Race (Ziel zwischenzeitlich verschwunden) wird freundlich statt mit Absturz
+  behandelt.
+- **Extraktionspfad** ([`agent/__init__.py`](src/kollege/agent/__init__.py)):
+  System-Prompt weist das Modell an, bei erkannter Lösch-Absicht nichts
+  anzulegen, sondern per `clarification` auf die neuen Commands zu verweisen —
+  echte LLM-Verifikation ist bewusst nicht in CI (siehe CLAUDE.md), daher nur
+  ein Regressionstest auf den Prompt-Text.
+- `/hilfe` aktualisiert.
+
+**Tests.** Neue Tests in [`test_db.py`](tests/test_db.py) (Löschverben,
+referentielle Regeln, unbekannte IDs), [`test_orchestrator.py`](tests/test_orchestrator.py)
+(Vorschau/Bestätigung/Ablehnung für alle drei Entitäten + `/zuruecksetzen`,
+Tapback-Varianten, Race-Handling, Invarianten: Lösch-Command verwirft offenen
+Vorschlag/offene Rückfrage, neue Notiz verwirft offene Lösch-Bestätigung),
+[`test_agent.py`](tests/test_agent.py) (System-Prompt-Regressionstest). 357
+Tests grün, `ruff`/`ruff format`/`mypy --strict` sauber.
+
+**Bewusst nicht im Scope.** Fuzzy-Matching/Mehrfachauswahl beim Löschen,
+Undo/Soft-Delete — reine ID-basierte Einzel-Löschung plus `reset_all()` für die
+Testdaten-Situation reicht für den aktuellen Bedarf.
+
+**Nächster Schritt.** Automatische Session (ohne Nutzerin) → **8.23**
+(Kontext-Deduplizierung + Gap-Check-Gating) als nächster automatisierbarer
+Schritt gesetzt; **8.5** (Live-Edge-Cases) bleibt der Schritt für die nächste
+Live-Session mit der Nutzerin — dort auch der neue 8.22-Lösch-Flow live prüfen.
+
+---
+
 ## 2026-07-03 — Trace-Analyse + Roadmap-Verschlankung (Doku, automatische Session)
 
 **Auslöser.** Erste echte LLM-Traces (8.21) analysiert

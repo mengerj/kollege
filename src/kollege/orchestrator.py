@@ -14,19 +14,26 @@ Die nächste Nachricht (Text, Sprache oder 👍-Tapback) gilt als Antwort darauf
 wird mit dem Ursprungstranskript neu extrahiert (Rückfrage-Antwort-Schleife).
 
 Pending-State: pro Absender (Rufnummer) genau *ein* offener Zustand im
-Arbeitsspeicher — entweder ein ``PendingProposal`` (wartet auf Bestätigung) oder
-eine ``PendingClarification`` (wartet auf Antwort), nie beides gleichzeitig. Beide
-führen ein ``history``-Feld: alle vorangegangenen Turns derselben Interaktion
-(Rückfragen, Antworten, Korrekturen), damit Referenzen wie »wie in der letzten
-Nachricht« über mehrere Runden hinweg auflösbar bleiben (Schritt 8.14). Die
-Historie ist strikt an eine laufende Interaktion gebunden und wird bei
-Bestätigung/Ablehnung verworfen — kein senderweites Dauergedächtnis.
+Arbeitsspeicher — ein ``PendingProposal`` (wartet auf Bestätigung), eine
+``PendingClarification`` (wartet auf Antwort) oder eine ``PendingDeletion``
+(wartet auf Lösch-Bestätigung, Schritt 8.22), nie mehr als einer gleichzeitig.
+``PendingProposal``/``PendingClarification`` führen ein ``history``-Feld: alle
+vorangegangenen Turns derselben Interaktion (Rückfragen, Antworten, Korrekturen),
+damit Referenzen wie »wie in der letzten Nachricht« über mehrere Runden hinweg
+auflösbar bleiben (Schritt 8.14). Die Historie ist strikt an eine laufende
+Interaktion gebunden und wird bei Bestätigung/Ablehnung verworfen — kein
+senderweites Dauergedächtnis.
 
 Dispatcher-Reihenfolge in ``handle_message`` (Schritt 8.15): Slash-Command? →
-offener Vorschlag/Rückfrage? → sonst neue Notiz. Deutsche Kommandos
-(``/offen``, ``/dringend``, ``/kontakte``, ``/projekte``, ``/erledigt <id>``,
-``/hilfe``) fragen den DB-Stand deterministisch ab — ohne LLM, unabhängig von
-einem etwaig offenen Vorschlag/einer Rückfrage.
+offene Lösch-Bestätigung/offener Vorschlag/Rückfrage? → sonst neue Notiz.
+Deutsche Kommandos (``/offen``, ``/dringend``, ``/kontakte``, ``/projekte``,
+``/erledigt <id>``, ``/loeschen kontakt|projekt|aufgabe <id>``,
+``/zuruecksetzen``, ``/hilfe``) fragen den DB-Stand deterministisch ab — ohne
+LLM, unabhängig von einem etwaig offenen Vorschlag/einer Rückfrage. Die
+destruktiven Lösch-Commands sind eine Ausnahme: sie legen selbst einen neuen
+Pending-Zustand an und verwerfen dafür einen etwaig offenen Vorschlag/eine
+offene Rückfrage desselben Absenders (Prinzip 3 — nie ohne Bestätigung löschen,
+aber auch nie zwei Bestätigungs-Dialoge gleichzeitig offen).
 """
 
 from __future__ import annotations
@@ -71,6 +78,7 @@ from kollege.transcription import Transcriber
 __all__ = [
     "Orchestrator",
     "PendingClarification",
+    "PendingDeletion",
     "PendingProposal",
     "dedupe_result",
     "format_contacts",
@@ -179,7 +187,18 @@ _HELP_TEXT = (
     "/kontakte — alle Kontakte\n"
     "/projekte — alle Projekte\n"
     '/erledigt <id> — Aufgabe als erledigt markieren (z.B. "/erledigt 3")\n'
+    "/loeschen kontakt|projekt|aufgabe <id> — Eintrag löschen, mit Bestätigung "
+    '(z.B. "/loeschen aufgabe 3")\n'
+    "/zuruecksetzen — ALLES löschen (Kontakte, Projekte, Aufgaben), mit Bestätigung\n"
     "/hilfe — diese Übersicht"
+)
+
+# "/loeschen kontakt|projekt|aufgabe <id>" (Schritt 8.22) — Groß-/Kleinschreibung
+# der Entität wie bei allen anderen Kommandos egal.
+_LOESCHEN_ARGS = re.compile(r"^(kontakt|projekt|aufgabe)\s+(\d+)$", re.IGNORECASE)
+_LOESCHEN_USAGE = (
+    'Nutzung: "/loeschen kontakt <id>", "/loeschen projekt <id>" oder '
+    '"/loeschen aufgabe <id>" (z.B. "/loeschen aufgabe 3").'
 )
 
 
@@ -284,6 +303,29 @@ class PendingClarification:
     history: list[tuple[str, str]] = field(default_factory=list)
     """Frühere Turns *dieser* Interaktion vor dieser Rückfrage — siehe
     ``PendingProposal.history`` (Schritt 8.14)."""
+
+
+@dataclass
+class PendingDeletion:
+    """Ausstehende Lösch-Bestätigung (Schritt 8.22).
+
+    Destruktive Commands (``/loeschen ...``, ``/zuruecksetzen``) löschen nie sofort,
+    sondern zeigen zuerst eine Vorschau (``label``: Name/Titel, bei einem Projekt
+    inkl. Anzahl mitgelöschter Aufgaben) und warten auf ein explizites 👍/„ja" —
+    dieselbe Zwei-Schritt-Bestätigung wie bei ``PendingProposal``, aber ohne
+    LLM-Ergebnis: die Aktion selbst (``action``/``target_id``) wird erst bei
+    Bestätigung ausgeführt.
+    """
+
+    sender: str
+    action: str
+    """"kontakt" | "projekt" | "aufgabe" | "zuruecksetzen"."""
+    target_id: int | None
+    """Zu löschende ID; ``None`` nur bei ``action == "zuruecksetzen"``."""
+    label: str
+    """Menschenlesbare Vorschau, die sowohl in der Bestätigungsfrage als auch in
+    der Erfolgsmeldung nach der Löschung erscheint."""
+    created_at: datetime = field(default_factory=_now)
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +655,7 @@ class Orchestrator:
         self._log_dir = log_dir
         self._pending: dict[str, PendingProposal] = {}
         self._pending_clarifications: dict[str, PendingClarification] = {}
+        self._pending_deletions: dict[str, PendingDeletion] = {}
         self._retry_delay = retry_delay
         self._trace: TraceWriter = trace if trace is not None else NoopTraceWriter()
 
@@ -660,6 +703,21 @@ class Orchestrator:
                 self._handle_command(msg.sender, cmd, cmd_args, rid)
                 return
 
+        # Antwort auf eine ausstehende Lösch-Bestätigung (Schritt 8.22)? Destruktiv,
+        # daher vor dem normalen Vorschlag geprüft — in der Praxis überschneiden sich
+        # beide ohnehin nicht (``/loeschen``/``/zuruecksetzen`` verwerfen einen etwaig
+        # offenen Vorschlag/eine offene Rückfrage beim Anlegen der Bestätigung).
+        if msg.sender in self._pending_deletions and msg.text:
+            text = msg.text.strip()
+            if _YES.match(text):
+                self._trace.write("routing", rid, {"entscheidung": "loeschen:bestätigung"})
+                self._confirm_deletion(msg.sender, rid)
+                return
+            if _NO.match(text):
+                self._trace.write("routing", rid, {"entscheidung": "loeschen:ablehnung"})
+                self._reject_deletion(msg.sender, rid)
+                return
+
         # Ist dies eine Antwort auf einen ausstehenden Vorschlag?
         if msg.sender in self._pending and msg.text:
             text = msg.text.strip()
@@ -699,6 +757,10 @@ class Orchestrator:
             return
 
         self._trace.write("routing", rid, {"entscheidung": "neue-notiz"})
+        # Eine neue Notiz beendet stillschweigend eine noch unbeantwortete
+        # Lösch-Bestätigung desselben Absenders — pro Sender ist höchstens ein
+        # Pending-Zustand gültig (Schritt 8.22).
+        self._pending_deletions.pop(msg.sender, None)
 
         # Normaler Ablauf: Transkript holen → extrahieren → Vorschlag schicken
         # Sofort-Quittung — knappe Bestätigung vor der langsamen Verarbeitung
@@ -799,15 +861,22 @@ class Orchestrator:
     # ---------------------------------------------------------------------- #
 
     def _handle_reaction(self, msg: IncomingMessage, run_id: str) -> None:
-        """Tapback-Reaktion (👍/👎) auf Vorschlag oder Rückfrage auswerten.
+        """Tapback-Reaktion (👍/👎) auf Vorschlag, Rückfrage oder Lösch-Bestätigung auswerten.
 
-        - 👍 auf Vorschlag → bestätigen; auf Rückfrage → als "Ja" beantworten.
-        - 👎 auf Vorschlag → ablehnen; auf Rückfrage → verwerfen.
+        - 👍 auf Vorschlag → bestätigen; auf Rückfrage → als "Ja" beantworten; auf
+          eine Lösch-Bestätigung (Schritt 8.22) → löschen.
+        - 👎 auf Vorschlag → ablehnen; auf Rückfrage → verwerfen; auf eine
+          Lösch-Bestätigung → abbrechen.
         - Neutrales Emoji oder kein offener Zustand → ignorieren (keine Extraktion).
         """
         emoji = msg.text
         if _is_affirmative_reaction(emoji):
-            if msg.sender in self._pending:
+            if msg.sender in self._pending_deletions:
+                self._trace.write(
+                    "routing", run_id, {"entscheidung": "reaktion:loeschen-bestätigung"}
+                )
+                self._confirm_deletion(msg.sender, run_id)
+            elif msg.sender in self._pending:
                 self._trace.write("routing", run_id, {"entscheidung": "reaktion:bestätigung"})
                 self._confirm(msg.sender, indices=None, run_id=run_id)
             elif msg.sender in self._pending_clarifications:
@@ -818,7 +887,12 @@ class Orchestrator:
                 self._trace.write("routing", run_id, {"entscheidung": "reaktion:ignoriert"})
             return
         if _is_negative_reaction(emoji):
-            if msg.sender in self._pending:
+            if msg.sender in self._pending_deletions:
+                self._trace.write(
+                    "routing", run_id, {"entscheidung": "reaktion:loeschen-ablehnung"}
+                )
+                self._reject_deletion(msg.sender, run_id)
+            elif msg.sender in self._pending:
                 self._trace.write("routing", run_id, {"entscheidung": "reaktion:ablehnung"})
                 self._reject(msg.sender, run_id)
             elif msg.sender in self._pending_clarifications:
@@ -846,6 +920,10 @@ class Orchestrator:
             self._channel.send(sender, format_projects(self._repo.list_projects()))
         elif cmd == "erledigt":
             self._handle_erledigt(sender, args)
+        elif cmd == "loeschen":
+            self._handle_loeschen(sender, args, run_id)
+        elif cmd == "zuruecksetzen":
+            self._handle_zuruecksetzen(sender, run_id)
         elif cmd == "hilfe":
             self._channel.send(sender, _HELP_TEXT)
         else:
@@ -865,6 +943,119 @@ class Orchestrator:
             self._channel.send(sender, f"Keine offene Aufgabe mit ID {task_id} gefunden.")
             return
         self._channel.send(sender, f'✅ Aufgabe #{task.id} "{task.title}" erledigt.')
+
+    def _handle_loeschen(self, sender: str, args: str, run_id: str) -> None:
+        """ "/loeschen kontakt|projekt|aufgabe <id>": Löschung vorschlagen (Schritt 8.22).
+
+        Destruktiv → nie sofort ausführen. Zeigt zuerst eine Vorschau (Name/Titel,
+        bei einem Projekt inkl. Anzahl mitgelöschter Aufgaben — Cascade, siehe
+        ``Repository.delete_project``) und legt eine ``PendingDeletion`` an, die
+        erst durch 👍/„ja" ausgeführt wird. Ein etwaig offener Vorschlag/eine
+        offene Rückfrage desselben Absenders wird dabei verworfen — pro Absender
+        ist höchstens ein Pending-Zustand gleichzeitig offen.
+        """
+        match = _LOESCHEN_ARGS.match(args.strip())
+        if match is None:
+            self._channel.send(sender, _LOESCHEN_USAGE)
+            return
+        kind = match.group(1).lower()
+        target_id = int(match.group(2))
+
+        if kind == "kontakt":
+            contact = self._repo.get_contact_by_id(target_id)
+            if contact is None:
+                self._channel.send(sender, f"Kein Kontakt mit ID {target_id} gefunden.")
+                return
+            label = f'Kontakt #{contact.id} "{contact.name}"'
+        elif kind == "projekt":
+            project = self._repo.get_project_by_id(target_id)
+            if project is None:
+                self._channel.send(sender, f"Kein Projekt mit ID {target_id} gefunden.")
+                return
+            task_count = len(self._repo.get_tasks_by_project(target_id))
+            extra = f" inkl. {task_count} Aufgabe(n)" if task_count else ""
+            label = f'Projekt #{project.id} "{project.title}"{extra}'
+        else:  # "aufgabe"
+            task = self._repo.get_task_by_id(target_id)
+            if task is None:
+                self._channel.send(sender, f"Keine Aufgabe mit ID {target_id} gefunden.")
+                return
+            label = f'Aufgabe #{task.id} "{task.title}"'
+
+        self._pending.pop(sender, None)
+        self._pending_clarifications.pop(sender, None)
+        self._pending_deletions[sender] = PendingDeletion(
+            sender=sender, action=kind, target_id=target_id, label=label
+        )
+        self._trace.write("proposal_sent", run_id, {"text": label, "aktion": f"loeschen:{kind}"})
+        self._channel.send(
+            sender,
+            f'{label} wirklich löschen?\n\nBestätige mit 👍 oder schreib "ja". '
+            'Abbrechen mit "nein".',
+        )
+
+    def _handle_zuruecksetzen(self, sender: str, run_id: str) -> None:
+        """ "/zuruecksetzen": ALLES löschen (Kontakte, Projekte, Aufgaben, Schritt 8.22).
+
+        Für die Testdaten-Situation (siehe Motiv in ROADMAP.md Schritt 8.22): eine
+        schnelle Möglichkeit, komplett neu anzufangen. Genau wie ``/loeschen`` nie
+        ohne Bestätigung — zeigt zuerst die Gesamtanzahl je Kategorie.
+        """
+        contacts = self._repo.get_all_contacts()
+        projects = self._repo.get_all_projects()
+        tasks = self._repo.get_all_tasks()
+        if not contacts and not projects and not tasks:
+            self._channel.send(sender, "Es ist nichts gespeichert, das gelöscht werden könnte.")
+            return
+        label = f"{len(contacts)} Kontakt(e), {len(projects)} Projekt(e), {len(tasks)} Aufgabe(n)"
+        self._pending.pop(sender, None)
+        self._pending_clarifications.pop(sender, None)
+        self._pending_deletions[sender] = PendingDeletion(
+            sender=sender, action="zuruecksetzen", target_id=None, label=label
+        )
+        self._trace.write(
+            "proposal_sent", run_id, {"text": label, "aktion": "loeschen:zuruecksetzen"}
+        )
+        self._channel.send(
+            sender,
+            f'Wirklich ALLES löschen? {label}.\n\nBestätige mit 👍 oder schreib "ja". '
+            'Abbrechen mit "nein".',
+        )
+
+    def _confirm_deletion(self, sender: str, run_id: str) -> None:
+        """Bestätigte Lösch-Aktion ausführen (Schritt 8.22).
+
+        Ist das Ziel zwischenzeitlich schon nicht mehr vorhanden (Race, doppelte
+        Bestätigung), wird das freundlich gemeldet statt einen Fehler zu werfen —
+        wie bei den Erledigungen/Änderungen in ``persist_result``.
+        """
+        pending = self._pending_deletions.pop(sender)
+        try:
+            if pending.action == "kontakt":
+                assert pending.target_id is not None
+                self._repo.delete_contact(pending.target_id)
+            elif pending.action == "projekt":
+                assert pending.target_id is not None
+                self._repo.delete_project(pending.target_id)
+            elif pending.action == "aufgabe":
+                assert pending.target_id is not None
+                self._repo.delete_task(pending.target_id)
+            else:
+                self._repo.reset_all()
+        except ValueError:
+            logger.info("Löschung für %s: Ziel bereits nicht mehr vorhanden", sender)
+            self._trace.write("rejected", run_id, {"grund": "bereits entfernt"})
+            self._channel.send(sender, "Das war zwischenzeitlich schon nicht mehr vorhanden.")
+            return
+        logger.info("Löschung bestätigt für %s: %s", sender, pending.label)
+        self._trace.write("confirmed", run_id, {"aktion": f"loeschen:{pending.action}"})
+        self._trace.write("persisted", run_id, {"count": 1, "labels": [pending.label]})
+        self._channel.send(sender, f"✅ {pending.label} gelöscht.")
+
+    def _reject_deletion(self, sender: str, run_id: str) -> None:
+        self._pending_deletions.pop(sender, None)
+        self._trace.write("rejected", run_id, {})
+        self._channel.send(sender, "Verworfen. Keine Änderungen gespeichert.")
 
     def _get_transcript(self, msg: IncomingMessage) -> str | None:
         """Text aus Nachricht holen: direkt oder via Transcriber (für Audio)."""

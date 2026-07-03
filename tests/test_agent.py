@@ -18,7 +18,7 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-from kollege.agent import agent, build_model
+from kollege.agent import _SYSTEM_PROMPT, agent, build_model
 from kollege.config import LLMProvider, Settings
 from kollege.db import Repository
 from kollege.models import (
@@ -63,6 +63,16 @@ def test_agent_output_is_valid_when_no_tools_called() -> None:
     assert isinstance(out.contacts, list)
     assert isinstance(out.tasks, list)
     assert isinstance(out.project_updates, list)
+
+
+def test_system_prompt_points_delete_intent_to_slash_commands() -> None:
+    """Schritt 8.22: Eine Lösch-Absicht im Freitext soll nicht mehr leer im
+    ExtractionResult verschwinden, sondern per clarification auf die
+    deterministischen Lösch-Commands verweisen (Regressionsschutz für die
+    Prompt-Instruktion)."""
+    assert "/loeschen" in _SYSTEM_PROMPT
+    assert "/zuruecksetzen" in _SYSTEM_PROMPT
+    assert "clarification" in _SYSTEM_PROMPT.split("Lösch-Absicht")[1]
 
 
 # --------------------------------------------------------------------------- #
