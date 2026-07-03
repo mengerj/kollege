@@ -176,12 +176,26 @@ aus `data/traces/2026-07-03.jsonl`:
    `[OFFENE AUFGABEN]`-User-Block; die `clarification`-Anweisung steht im
    System-Prompt, im `[BEKANNTE NAMEN]`-Block und im `[OFFENE AUFGABEN]`-Block.
 3. **Aufgaben-Titel als Volltext doppelt** im Gap-Check (Kontextblock + Vorschlag).
+4. **Gap-Check läuft bedingungslos bei *jeder* Notiz** (in
+   [`_extract`](src/kollege/orchestrator.py) direkt nach dem ersten Durchgang, nur
+   bei `first.clarification` übersprungen). Der zweite LLM-Call ist damit ein
+   **fester Verdopplungsfaktor** auf Latenz *und* Tokens der Erstextraktion —
+   unabhängig davon, ob es überhaupt Lücken zu füllen gibt. Im Trace war das
+   Ergebnis byte-identisch (`output ==`), d. h. der komplette zweite Call war reine
+   Verschwendung.
+5. **Trace-Format speichert den Prompt doppelt** (kein LLM-Token, aber Disk /
+   schnelleres Wachstum der Trace-Dateien): der Prompt-Text steht sowohl in
+   `llm_run_start.payload.prompt` als auch nochmal in
+   `llm_run_result.payload.messages` (dort als `user-prompt`-Part). Eines von
+   beiden reicht — z. B. in `llm_run_result` nur noch die *neuen* Nachrichten seit
+   `llm_run_start` ablegen oder den redundanten `prompt` in `llm_run_start` weglassen.
 
 **Ansatz (Umfang im Schritt festzurren, messen mit Traces vorher/nachher).**
 - **Gap-Check gaten statt immer laufen lassen:** zweiten Durchgang nur auslösen,
   wenn das Erstergebnis **plausible Lücken** hat (z. B. Aufgabe ohne Datum/Projekt,
   oder nicht-leeres Ergebnis) — bei einer reinen Erledigungs-Notiz wie im Trace
-  bringt er nichts. Alternativ: Gap-Check nur, wenn `first`-Ergebnis nicht leer.
+  bringt er nichts. Alternativ/Minimal: Gap-Check nur, wenn `first`-Ergebnis nicht
+  leer ist (spart den ganzen zweiten Call bei „nichts erkannt"/reinen Erledigungen).
 - **Kontext im Gap-Check abspecken:** im „Erster Vorschlag" nur **IDs/Kurzform**
   statt Volltitel wiederholen (die Titel stehen bereits im `[OFFENE AUFGABEN]`-
   Block), oder den `[OFFENE AUFGABEN]`-Block im zweiten Durchgang weglassen, wenn
@@ -189,15 +203,20 @@ aus `data/traces/2026-07-03.jsonl`:
 - **Instruktionen entdoppeln:** eine Quelle der Wahrheit — Detailregeln im
   System-Prompt, die Kontextblöcke nur noch **Daten** (Namen/Aufgabenliste) ohne
   wiederholte Handlungsanweisung.
+- **Trace-Redundanz beheben** (Punkt 5) — kleiner, isolierter Cleanup in
+  [`trace.py`](src/kollege/trace.py)/[`agent/__init__.py`](src/kollege/agent/__init__.py);
+  Viewer [`scripts/show_trace.py`](scripts/show_trace.py) entsprechend anpassen.
 
 **Bewusst kein Blindflug.** Token-Sparen darf die in 8.11/8.18 gemessene Qualität
 nicht verschlechtern → **Benchmark (8.11) vor/nach** fahren (`pass_rate`,
 `empty_rate`, `over_extraction_rate`), damit klar ist, dass nur Redundanz
-wegfällt, keine Wirkung.
+wegfällt, keine Wirkung. Das Gap-Check-Gating ist der Punkt mit dem höchsten
+Risiko für die Qualität (8.18 war genau dafür da) → hier besonders sorgfältig messen.
 
 **DoD.** Gap-Check läuft nur noch bei tatsächlichem Bedarf (Gating getestet);
 Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
-Input-Tokens vorher/nachher dokumentiert); Benchmark zeigt **keine** Qualitäts-
+Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
+doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
 Regression; CI-Kette grün.
 
 ---
