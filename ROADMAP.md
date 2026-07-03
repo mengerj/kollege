@@ -12,26 +12,25 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.21 — Live-Debugging-Observability (LLM-Traces + lückenloses Verlaufs-Log).**
+**Schritt 8.12 — DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden** (rein
+automatisierbar, siehe Details/DoD weiter unten) — **oder**, sobald wieder live
+mit der Nutzerin getestet wird: **Schritt 8.5** (restliche Live-Edge-Cases) mit
+der neuen Observability (8.21) wiederholen, inkl. Validierung von 8.18/8.19 und
+dem 8.20-Szenario live. Danach: Stufe B für **Kontakte** (Umbenennung + Merge).
 
-**Schritt 8.20 erledigt** (Bugfix aus Live-Test 2026-07-02): Der Korrektur-Lauf
-verlor bereits erkannte **Erledigungen**, weil `_format_result_for_revision` dem LLM
-die `completed`-Einträge des bisherigen Vorschlags nicht zeigte. Formatter
-vereinheitlicht (`_format_result_for_prompt`, zeigt jetzt in beiden Läufen auch
-`completed`/`edits`), Revisions-Prompt geschärft („Unbetroffene Einträge unverändert
-übernehmen"), Regression durch Prompt-Test, Verhaltens-Test (treues FunctionModel),
-Orchestrator-Test und ein neues Benchmark-Fixture abgesichert. 294 Tests grün.
-
-**Konkret als Nächstes (8.21):** Die 8.20-Analyse war nur per Code-Rekonstruktion
-möglich, weil **nichts** vom LLM-Verkehr aufgezeichnet wird (keine Prompts, keine
-Tool-Calls; die INFO-Zeilen zählten `completed`/`edits` nicht mit). Schritt 8.21
-baut opt-in-LLM-Traces (`KOLLEGE_TRACE=1`, JSONL), schließt die Logging-Lücken und
-liefert einen Trace-Viewer — Details/DoD unten.
-
-**Danach:** Schritt 8.5 (restliche Live-Edge-Cases) mit der neuen Observability
-wiederholen — inkl. Validierung von 8.18/8.19 und dem 8.20-Szenario live. Anschließend
-Stufe B für **Kontakte** (Umbenennung + Merge) oder **8.12** (EU-LLM-Anbieter,
-rein automatisierbar, falls keine Nutzerin verfügbar).
+**Schritt 8.21 erledigt** (automatische Session): Die 8.20-Analyse war nur per
+Code-Rekonstruktion möglich, weil nichts vom LLM-Verkehr aufgezeichnet wurde.
+Jetzt gibt es opt-in-LLM-Traces (`KOLLEGE_TRACE=1`, JSONL,
+[`src/kollege/trace.py`](src/kollege/trace.py)): jeder LLM-Lauf (Kind, Modell,
+kompletter Prompt, alle Tool-Calls/Retries via `capture_run_messages` +
+`ModelMessagesTypeAdapter`, Tokens, Latenz, Primär-/Fallback-Pfad — auch bei
+Fehlern) und jedes Orchestrator-Ereignis (Eingang, Routing, Vorschlag/Rückfrage,
+Bestätigung/Ablehnung, Persistenz, Fehler) landet unter einer gemeinsamen
+`run_id` pro eingehender Nachricht. Viewer
+[`scripts/show_trace.py`](scripts/show_trace.py) (`--date`/`--last`/`--run`/`--full`)
+macht das lesbar. Dauer-Log bleibt inhaltsfrei, zählt aber jetzt `completed`/
+`edits` mit; `kollege.log` wird per `FileHandler` auch ohne Shell-Redirect
+geschrieben. 328 Tests grün.
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -63,7 +62,7 @@ rein automatisierbar, falls keine Nutzerin verfügbar).
 | 8.9 | Robuster Dauerbetrieb (Dienst, Warm-Start, Verlust-Schutz) | 1.5 | ✅ erledigt |
 | 8.10 | Eval-Set für Extraktionsqualität | 1.5 | ✅ erledigt |
 | 8.11 | Modell-Benchmark-System (Extraktion + Revision) | 1.5 | ✅ erledigt |
-| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ⬜ offen |
+| 8.12 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 1.5 | ▶ nächster Schritt |
 | 8.13 | Rückfrage-Antwort-Schleife + robuste 👍/👎-Erkennung | 1.5 | ✅ erledigt |
 | 8.14 | Vollständige Historie pro Pending-Proposal | 1.5 | ✅ erledigt |
 | 8.15 | Query-Funktionen + deutsche Slash-Commands | 1.5 | ✅ erledigt |
@@ -72,7 +71,7 @@ rein automatisierbar, falls keine Nutzerin verfügbar).
 | 8.18 | Zwei-Durchgang-Extraktion + deutsche Datumsanzeige | 1.5 | ✅ erledigt |
 | 8.19 | Bestehende Aufgaben bearbeiten (Stufe B, nur Aufgaben) | 1.5 | ✅ erledigt |
 | 8.20 | Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix) | 1.5 | ✅ erledigt |
-| 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ▶ nächster Schritt |
+| 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
 | 11 | Scheduler (APScheduler) + Tagesbriefing | 2 | ⬜ offen |
@@ -816,7 +815,7 @@ Lauf 1 (siehe „Bewusst offen" unten).
   `must_contain_task_ids` erweitert, via `scripts/benchmark_models.py` nutzbar).
 - ✅ CI-Kette grün (`ruff` / `mypy --strict` / `pytest`, 294 Tests).
 
-### Schritt 8.21 — Live-Debugging-Observability: LLM-Traces + lückenloses Verlaufs-Log ⬜
+### Schritt 8.21 — Live-Debugging-Observability: LLM-Traces + lückenloses Verlaufs-Log ✅
 
 **Motiv (aus der 8.20-Analyse).** Der Vorfall war **nicht aus Aufzeichnungen
 rekonstruierbar**, sondern nur durch Code-Lektüre: Es gibt kein Protokoll, welchen
@@ -890,6 +889,25 @@ soll im Nachhinein vier Fragen vollständig beantworten:
 - [`docs/live-testing-guide.md`](docs/live-testing-guide.md) §3 um Abschnitt
   „e) LLM-Traces" erweitern (Aktivieren, Anschauen, Löschen).
 
+**Umgesetzt — Design-Entscheidungen (im Schritt getroffen).**
+- **`run_id`-Umfang:** eine `run_id` pro **eingehender Nachricht**
+  (`Orchestrator.handle_message`), geteilt von *allen* Orchestrator-Ereignissen
+  **und** allen darin ausgelösten LLM-Läufen dieser einen Nachricht (z. B.
+  Erst-Extraktion **und** Lücken-Prüfung tragen dieselbe `run_id`, unterschieden
+  über `kind`). Dadurch zeigt die Standard-Ansicht (`--date`, kein `--run`)
+  bereits den **kompletten Faden** über mehrere Nachrichten hinweg (Nachricht →
+  Vorschlag → Korrektur → Bestätigung sind ohnehin chronologisch in derselben
+  Tagesdatei); `--run <id>` zoomt gezielt in **eine** Nachricht/einen
+  Verarbeitungszyklus.
+- **Env-Name `KOLLEGE_TRACE`** (nicht `KOLLEGE_TRACE_ENABLED`): das
+  Präfix-Schema von pydantic-settings hätte automatisch Letzteres erzeugt;
+  `Field(validation_alias="KOLLEGE_TRACE")` erzwingt den kurzen, in der Planung
+  festgelegten Namen.
+- Primär- **und** Fallback-Pfad in `run_extraction` sind je in einen eigenen
+  `capture_run_messages()`-Block gefasst (nicht einen gemeinsamen), damit auch
+  ein scheiternder Fallback-Lauf seine Messages ins Trace schreibt, bevor die
+  Exception weitergereicht wird.
+
 **Abwägungen.**
 - **Pydantic Logfire** (von pydantic-ai nativ unterstützt) böte UI/Spans, ist aber
   ein Cloud-Dienst → für Volltext-Traces gegen lokal-first/Datensparsamkeit.
@@ -908,14 +926,21 @@ soll im Nachhinein vier Fragen vollständig beantworten:
   Nachricht → Vorschlag → Korrektur → Bestätigung → persisted).
 - Viewer: reine Parse-/Format-Funktionen unit-getestet.
 
-**DoD.**
-- Mit `KOLLEGE_TRACE=1` erzeugt der Ablauf Nachricht → Vorschlag → Korrektur →
+**DoD.** ✅
+- ✅ Mit `KOLLEGE_TRACE=1` erzeugt der Ablauf Nachricht → Vorschlag → Korrektur →
   Bestätigung eine Trace-Datei, aus der `scripts/show_trace.py` den kompletten
   Faden lesbar rendert — inkl. exaktem LLM-Kontext und allen Tool-Calls je Lauf,
-  auch bei gescheiterten Läufen.
-- INFO-Zeilen zählen `completed`/`edits` mit; `kollege.log` wird auch ohne
+  auch bei gescheiterten Läufen (manuell smoke-getestet mit einem echten
+  `FunctionModel`-Lauf gegen ein `tmp`-Trace-Verzeichnis).
+- ✅ INFO-Zeilen zählen `completed`/`edits` mit (alle drei Stellen: Erst-Extraktion,
+  Rückfrage-Antwort, Korrektur-Lauf); `kollege.log` wird via zusätzlichem
+  `FileHandler` in [`scripts/run_signal.py`](scripts/run_signal.py) auch ohne
   Shell-Redirect geschrieben.
-- Guide §3e dokumentiert Nutzung + Datensparsamkeits-Hinweis; CI-Kette grün.
+- ✅ Guide §3e dokumentiert Nutzung + Datensparsamkeits-Hinweis (Aktivieren/
+  Anschauen/Löschen); CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`,
+  328 Tests: neue [`test_trace.py`](tests/test_trace.py),
+  [`test_show_trace.py`](tests/test_show_trace.py), Erweiterungen in
+  `test_agent.py`/`test_orchestrator.py`/`test_config.py`).
 
 ---
 

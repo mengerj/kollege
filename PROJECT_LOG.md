@@ -5,6 +5,85 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-03 — Schritt 8.21 — Live-Debugging-Observability (LLM-Traces + Verlaufs-Log, automatische Session)
+
+**Auslöser.** Die 8.20-Bugfix-Analyse (siehe Eintrag darunter) war nur per
+Code-Rekonstruktion möglich — es gab kein Protokoll, welchen Kontext das LLM
+bekam, welche Tools es aufrief oder ob Primär- oder Fallback-Pfad lief; die
+INFO-Zeilen zählten `completed`/`edits` nicht mit; `kollege.log` entstand nur
+bei Shell-Redirect. Details/Motiv/DoD siehe [ROADMAP.md](ROADMAP.md).
+
+**Umsetzung.**
+
+### Baustein 1 — Trace-Modul (opt-in, Volltext)
+- [`src/kollege/trace.py`](src/kollege/trace.py) (neu): `TraceWriter`-Protocol,
+  `NoopTraceWriter` (Default), `JsonlTraceWriter` (append-only, eine Datei pro
+  Tag `data/traces/<datum>.jsonl`).
+- [`config.py`](src/kollege/config.py): `Settings.trace_enabled` (env
+  `KOLLEGE_TRACE` — via `Field(validation_alias=...)`, weil das Präfix-Schema
+  sonst `KOLLEGE_TRACE_ENABLED` erzeugt hätte) + `Settings.trace_dir` (Default
+  `data/traces`).
+- [`agent/__init__.py`](src/kollege/agent/__init__.py): `run_extraction()`
+  bekommt `kind` (`extraktion|gap_check|revision|clarification_response`) +
+  `trace`/`run_id`. Primär- **und** Fallback-Pfad sind je einzeln in
+  `capture_run_messages()` gefasst, damit auch gescheiterte Läufe ihre
+  Tool-Calls/Retries ins Trace schreiben (`llm_run_error`), bevor ggf. die
+  Exception weitergereicht wird; erfolgreiche Läufe schreiben `llm_run_result`
+  (Pfad, Latenz, Token-`usage`, per `ModelMessagesTypeAdapter` serialisierte
+  Messages, finales Ergebnis). `run_gap_check`/`run_revision`/
+  `run_clarification_response` reichen `trace`/`run_id` durch und setzen `kind`.
+- [`orchestrator.py`](src/kollege/orchestrator.py): `Orchestrator` bekommt einen
+  `trace`-Konstruktor-Parameter (Default `Noop`). `handle_message()` erzeugt pro
+  eingehender Nachricht eine `run_id` und schreibt `message_received`/`routing`/
+  `proposal_sent`/`clarification_sent`/`confirmed`/`rejected`/`persisted`/
+  `error` — dieselbe `run_id` wird an `_extract`/`_revise`/
+  `_answer_clarification` durchgereicht, sodass auch die darin ausgelösten
+  LLM-Läufe (inkl. Lücken-Prüfung) zum selben Vorgang gehören.
+  **Design-Entscheidung:** eine `run_id` pro Nachricht (nicht pro LLM-Aufruf) —
+  die Standardansicht des Viewers zeigt dadurch bereits den kompletten Faden
+  über mehrere Nachrichten (Notiz → Vorschlag → Korrektur → Bestätigung)
+  chronologisch; `--run <id>` zoomt in einen einzelnen Verarbeitungszyklus.
+
+### Baustein 2 — Dauer-Logging-Lücken (immer an, inhaltsfrei)
+- Alle drei INFO-Zeilen in `orchestrator.py` (Erst-Extraktion, Rückfrage-
+  Antwort, Korrektur-Lauf) zählen jetzt zusätzlich `completed`/`edits`.
+- [`scripts/run_signal.py`](scripts/run_signal.py): `logging.basicConfig` nutzt
+  jetzt `StreamHandler` **und** `FileHandler("kollege.log")`, verdrahtet den
+  `TraceWriter` aus `Settings` in den `Orchestrator`.
+
+### Baustein 3 — Trace-Viewer
+- [`scripts/show_trace.py`](scripts/show_trace.py) (neu): `--date`/`--last N`/
+  `--run <id>`/`--full`. Rendert chronologisch: Nachricht, Routing, pro
+  LLM-Lauf Kind/Modell/Prompt/Tool-Call-Sequenz/Tokens/Latenz/Pfad/Ergebnis,
+  Vorschlag/Rückfrage, Bestätigung/Ablehnung/Persistenz, Fehler.
+- [`docs/live-testing-guide.md`](docs/live-testing-guide.md) §3e (neu):
+  Aktivieren/Anschauen/Löschen.
+
+**Tests.** Neue [`test_trace.py`](tests/test_trace.py) (Writer-Verhalten),
+Erweiterungen in [`test_agent.py`](tests/test_agent.py) (Primär-Erfolg,
+Primär-Fehler→Fallback, `run_id`-Generierung, Durchreichung in
+`run_gap_check`), [`test_orchestrator.py`](tests/test_orchestrator.py)
+(voller Faden Notiz→Vorschlag→Korrektur→Bestätigung mit echtem
+`JsonlTraceWriter`, `rejected`/`clarification_sent`/`error`-Events),
+[`test_config.py`](tests/test_config.py) (Env-Alias), neue
+[`test_show_trace.py`](tests/test_show_trace.py) (reine Parse-/
+Format-Funktionen + `main()`-Exit-Codes). 328 Tests grün, `ruff`/
+`ruff format`/`mypy --strict` sauber. Manuell smoke-getestet: ein echter
+`FunctionModel`-Lauf gegen ein `tmp`-Trace-Verzeichnis, Ausgabe von
+`scripts/show_trace.py` geprüft (Prompt, Tool-Call, Ergebnis, Tokens lesbar).
+
+**Bewusst nicht im Scope.** Pydantic Logfire (Cloud-Dienst, gegen
+Datensparsamkeit — lokale JSONL zuerst, Logfire/OTel bei VPS-Betrieb neu
+bewerten); automatisches Löschen alter Traces (manuell `rm -r data/traces`).
+
+**Nächster Schritt.** Da diese Session automatisch (ohne Nutzerin) lief, ist
+**8.5** (Live-Edge-Cases) nicht bearbeitbar — laut Roadmap-Vorgabe daher
+**8.12** (EU-LLM-Anbieter, „rein automatisierbar, falls keine Nutzerin
+verfügbar") als nächster Schritt gesetzt; 8.5 bleibt der Schritt für die
+nächste Live-Session mit der Nutzerin.
+
+---
+
 ## 2026-07-03 — Schritt 8.20 — Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix)
 
 **Auslöser (Live-Test 2026-07-02, `mistral-medium-3.1` via OpenRouter).** Eine lange

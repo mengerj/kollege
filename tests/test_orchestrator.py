@@ -1398,3 +1398,160 @@ def test_plain_text_starting_without_slash_is_not_a_command(
     with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
         orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
     assert SENDER in orc._pending
+
+
+# ---------------------------------------------------------------------------
+# LLM-/Verlaufs-Traces (Schritt 8.21)
+# ---------------------------------------------------------------------------
+
+
+def _read_trace_events(trace_dir: Path) -> list[dict[str, object]]:
+    """Alle Ereignisse der heutigen Trace-Datei einlesen (chronologisch)."""
+    import datetime
+    import json
+
+    today = datetime.datetime.now(tz=datetime.UTC).date().isoformat()
+    path = trace_dir / f"{today}.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_orchestrator_without_trace_argument_defaults_to_noop(
+    channel: MemoryChannel, repo: Repository, settings: Settings, log_dir: Path
+) -> None:
+    """Ohne ``trace``-Argument läuft der Orchestrator unverändert (Default: Noop)."""
+    orchestrator = Orchestrator(
+        channel=channel, repo=repo, transcriber=None, settings=settings, log_dir=log_dir
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, text="Test"))
+    assert SENDER in orchestrator._pending
+
+
+def test_full_thread_writes_orchestrator_trace_events(
+    channel: MemoryChannel, repo: Repository, settings: Settings, log_dir: Path, tmp_path: Path
+) -> None:
+    """Nachricht → Vorschlag → Korrektur → Bestätigung erzeugt eine lesbare
+    Trace-Datei mit dem kompletten Faden (Schritt 8.21 DoD).
+    """
+    from kollege.trace import JsonlTraceWriter
+
+    trace_dir = tmp_path / "traces"
+    writer = JsonlTraceWriter(trace_dir)
+    orchestrator = Orchestrator(
+        channel=channel,
+        repo=repo,
+        transcriber=None,
+        settings=settings,
+        log_dir=log_dir,
+        trace=writer,
+    )
+
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
+
+    with patch("kollege.orchestrator.run_revision", return_value=_result_revised()):
+        orchestrator.handle_message(
+            IncomingMessage(
+                sender=SENDER,
+                text="Nicht Schnitt, sondern Schmidt",
+                quote_target_timestamp=1_234_567_890,
+            )
+        )
+
+    orchestrator.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    events = _read_trace_events(trace_dir)
+    event_names = [e["event"] for e in events]
+    # Drei Nachrichten-Zyklen → drei message_received-Ereignisse, mit eigener run_id.
+    assert event_names.count("message_received") == 3
+    assert "routing" in event_names
+    assert event_names.count("proposal_sent") == 2  # Erst-Vorschlag + Korrektur
+    assert "confirmed" in event_names
+    assert "persisted" in event_names
+
+    run_ids = {e["run_id"] for e in events}
+    assert len(run_ids) == 3  # jede Nachricht bekommt eine eigene run_id
+
+    persisted_payload = next(e["payload"] for e in events if e["event"] == "persisted")
+    assert persisted_payload["count"] == 1  # type: ignore[index]
+
+
+def test_rejection_writes_rejected_event(
+    channel: MemoryChannel, repo: Repository, settings: Settings, log_dir: Path, tmp_path: Path
+) -> None:
+    """Ablehnung eines Vorschlags ("nein") schreibt ein ``rejected``-Ereignis."""
+    from kollege.trace import JsonlTraceWriter
+
+    trace_dir = tmp_path / "traces"
+    writer = JsonlTraceWriter(trace_dir)
+    orchestrator = Orchestrator(
+        channel=channel,
+        repo=repo,
+        transcriber=None,
+        settings=settings,
+        log_dir=log_dir,
+        trace=writer,
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, text="Test"))
+
+    orchestrator.handle_message(IncomingMessage(sender=SENDER, text="nein"))
+
+    events = _read_trace_events(trace_dir)
+    assert "rejected" in [e["event"] for e in events]
+
+
+def test_clarification_writes_clarification_sent_event(
+    channel: MemoryChannel, repo: Repository, settings: Settings, log_dir: Path, tmp_path: Path
+) -> None:
+    """Eine Rückfrage aus der Extraktion schreibt ein ``clarification_sent``-Ereignis."""
+    from kollege.trace import JsonlTraceWriter
+
+    trace_dir = tmp_path / "traces"
+    writer = JsonlTraceWriter(trace_dir)
+    orchestrator = Orchestrator(
+        channel=channel,
+        repo=repo,
+        transcriber=None,
+        settings=settings,
+        log_dir=log_dir,
+        trace=writer,
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_clarification()):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, text="Unklare Notiz"))
+
+    events = _read_trace_events(trace_dir)
+    payload = next(e["payload"] for e in events if e["event"] == "clarification_sent")
+    assert payload["frage"] == "Welches Projekt meinst du?"  # type: ignore[index]
+
+
+def test_error_during_extraction_writes_error_event(
+    channel: MemoryChannel, repo: Repository, settings: Settings, log_dir: Path, tmp_path: Path
+) -> None:
+    """Ein unerwarteter Fehler beim Verarbeiten schreibt ein ``error``-Ereignis
+    mit derselben ``run_id`` wie der ``message_received`` der auslösenden Nachricht.
+    """
+    from kollege.trace import JsonlTraceWriter
+
+    trace_dir = tmp_path / "traces"
+    writer = JsonlTraceWriter(trace_dir)
+    orchestrator = Orchestrator(
+        channel=channel,
+        repo=repo,
+        transcriber=None,
+        settings=settings,
+        log_dir=log_dir,
+        trace=writer,
+        retry_delay=0.0,
+    )
+    channel.inbox.append(IncomingMessage(sender=SENDER, text="Löst einen Fehler aus"))
+    with patch("kollege.orchestrator.run_extraction", side_effect=RuntimeError("kaputt")):
+        orchestrator.run_once()
+
+    events = _read_trace_events(trace_dir)
+    by_event = {e["event"]: e for e in events}
+    assert "error" in by_event
+    assert by_event["error"]["run_id"] == by_event["message_received"]["run_id"]
+    assert by_event["error"]["payload"]["exception_type"] == "RuntimeError"  # type: ignore[index]

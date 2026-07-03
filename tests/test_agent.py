@@ -519,3 +519,150 @@ def test_run_revision_prompt_completed_survive_reflecting_model() -> None:
         )
 
     assert {c.task_id for c in revised.completed} == {7, 8, 9}
+
+
+# --------------------------------------------------------------------------- #
+# LLM-Traces (Schritt 8.21)                                                    #
+# --------------------------------------------------------------------------- #
+
+
+class _RecordingTraceWriter:
+    """Test-Double: sammelt geschriebene Ereignisse statt sie zu persistieren."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict[str, object]]] = []
+
+    def write(self, event: str, run_id: str, payload: dict[str, object]) -> None:
+        self.events.append((event, run_id, payload))
+
+
+def test_run_extraction_without_trace_is_a_noop() -> None:
+    """Ohne ``trace``-Argument entsteht kein Fehler (Default: NoopTraceWriter)."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_extraction
+
+    repo = _repo()
+    with patch("kollege.agent.build_model", return_value=TestModel(call_tools=[])):
+        result = run_extraction("Ein Test-Transkript.", repo, Settings())
+    assert isinstance(result, ExtractionResult)
+
+
+def test_run_extraction_traces_primary_path_success() -> None:
+    """Ein erfolgreicher Primär-Lauf schreibt genau ``llm_run_start``/``llm_run_result``
+    mit Kind, Pfad, Messages (Tool-Calls/Antwort) und Token-Usage.
+    """
+    from unittest.mock import patch
+
+    from kollege.agent import run_extraction
+    from kollege.models import ExtractedTask
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        result = ExtractionResult(tasks=[ExtractedTask(title="Testaufgabe")])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args=result.model_dump_json())]
+        )
+
+    writer = _RecordingTraceWriter()
+    repo = _repo()
+    with patch("kollege.agent.build_model", return_value=FunctionModel(fn)):
+        run_extraction(
+            "Ein Test-Transkript.",
+            repo,
+            Settings(),
+            kind="gap_check",
+            trace=writer,
+            run_id="rid-1",
+        )
+
+    events = {e: (rid, payload) for e, rid, payload in writer.events}
+    assert set(events) == {"llm_run_start", "llm_run_result"}
+    assert events["llm_run_start"][0] == "rid-1"
+    assert events["llm_run_start"][1]["kind"] == "gap_check"
+    assert events["llm_run_start"][1]["prompt"] == "Ein Test-Transkript."
+    result_payload = events["llm_run_result"][1]
+    assert result_payload["path"] == "primär"
+    assert result_payload["kind"] == "gap_check"
+    assert len(result_payload["messages"]) >= 2  # type: ignore[arg-type]
+    assert "requests" in result_payload["usage"]  # type: ignore[operator]
+    assert result_payload["output"]["tasks"][0]["title"] == "Testaufgabe"  # type: ignore[index]
+
+
+def test_run_extraction_traces_primary_error_then_fallback_result() -> None:
+    """Scheitert der Primär-Pfad (kein ``final_result``-Tool), landet ein
+    ``llm_run_error`` fürs Primär im Trace — inkl. der gescheiterten Messages —
+    gefolgt vom ``llm_run_result`` des Fallback-Pfads.
+    """
+    from unittest.mock import patch
+
+    from pydantic_ai.messages import TextPart
+
+    from kollege.agent import run_extraction
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[TextPart(content="Ich bin unsicher, was gemeint ist.")])
+
+    writer = _RecordingTraceWriter()
+    repo = _repo()
+    with patch("kollege.agent.build_model", return_value=FunctionModel(fn)):
+        result = run_extraction(
+            "Ein unklares Transkript.",
+            repo,
+            Settings(),
+            trace=writer,
+            run_id="rid-2",
+        )
+
+    event_names = [e for e, _, _ in writer.events]
+    assert event_names == ["llm_run_start", "llm_run_error", "llm_run_result"]
+    error_payload = writer.events[1][2]
+    assert error_payload["path"] == "primär"
+    assert error_payload["exception_type"]
+    assert error_payload["messages"]  # gescheiterte Messages sind nicht leer
+    result_payload = writer.events[2][2]
+    assert result_payload["path"] == "fallback"
+    assert result.clarification == "Ich bin unsicher, was gemeint ist."
+
+
+def test_run_extraction_generates_run_id_when_omitted() -> None:
+    """Ohne ``run_id``-Argument wird pro Aufruf eine frische ID erzeugt."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_extraction
+
+    writer = _RecordingTraceWriter()
+    repo = _repo()
+    with patch("kollege.agent.build_model", return_value=TestModel(call_tools=[])):
+        run_extraction("Text 1", repo, Settings(), trace=writer)
+        run_extraction("Text 2", repo, Settings(), trace=writer)
+
+    run_ids = {rid for _, rid, _ in writer.events}
+    assert len(run_ids) == 2
+
+
+def test_run_gap_check_passes_trace_and_run_id_through() -> None:
+    """``run_gap_check`` reicht ``trace``/``run_id`` an ``run_extraction`` durch
+    und setzt ``kind='gap_check'``."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_gap_check
+
+    captured: dict[str, object] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured.update(kwargs)
+        return ExtractionResult()
+
+    writer = _RecordingTraceWriter()
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_gap_check(
+            original_transcript="Text",
+            first_result=ExtractionResult(),
+            settings=Settings(),
+            trace=writer,
+            run_id="rid-3",
+        )
+
+    assert captured["kind"] == "gap_check"
+    assert captured["trace"] is writer
+    assert captured["run_id"] == "rid-3"

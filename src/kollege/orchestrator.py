@@ -65,6 +65,7 @@ from kollege.models import (
     TaskSource,
     TaskStatus,
 )
+from kollege.trace import NoopTraceWriter, TraceWriter, new_run_id
 from kollege.transcription import Transcriber
 
 __all__ = [
@@ -603,6 +604,7 @@ class Orchestrator:
         settings: Settings,
         log_dir: Path,
         retry_delay: float = _EXTRACTION_RETRY_DELAY,
+        trace: TraceWriter | None = None,
     ) -> None:
         self._channel = channel
         self._repo = repo
@@ -612,13 +614,20 @@ class Orchestrator:
         self._pending: dict[str, PendingProposal] = {}
         self._pending_clarifications: dict[str, PendingClarification] = {}
         self._retry_delay = retry_delay
+        self._trace: TraceWriter = trace if trace is not None else NoopTraceWriter()
 
     # ---------------------------------------------------------------------- #
     # Öffentliche API                                                          #
     # ---------------------------------------------------------------------- #
 
-    def handle_message(self, msg: IncomingMessage) -> None:
-        """Eine eingehende Nachricht verarbeiten (synchron, blockierend)."""
+    def handle_message(self, msg: IncomingMessage, run_id: str | None = None) -> None:
+        """Eine eingehende Nachricht verarbeiten (synchron, blockierend).
+
+        ``run_id`` gruppiert alle Trace-Ereignisse (Orchestrator + darin
+        ausgelöste LLM-Läufe) dieser einen Nachricht (Schritt 8.21). Ohne
+        Angabe (z. B. Aufruf aus Tests) wird eine frische ID erzeugt.
+        """
+        rid = run_id if run_id is not None else new_run_id()
         kind = "Reaktion" if msg.is_reaction else ("Audio" if msg.audio_path else "Text")
         logger.info(
             "Eingang von %s (%s, pending=%s, rückfrage=%s)",
@@ -627,12 +636,17 @@ class Orchestrator:
             msg.sender in self._pending,
             msg.sender in self._pending_clarifications,
         )
+        self._trace.write(
+            "message_received",
+            rid,
+            {"sender": msg.sender, "kind": kind, "text": msg.text},
+        )
 
         # Tapback-Reaktion (👍/👎): auf einen offenen Vorschlag = Bestätigung/Ablehnung,
         # auf eine offene Rückfrage = Ja/Nein-Antwort. Reaktionen ohne offenen
         # Zustand oder mit neutralem Emoji werden ignoriert (keine Extraktion).
         if msg.is_reaction:
-            self._handle_reaction(msg)
+            self._handle_reaction(msg, rid)
             return
 
         # Slash-Command (deutsch, z. B. "/offen")? Hat Vorrang vor einem offenen
@@ -642,29 +656,34 @@ class Orchestrator:
             parsed = _parse_command(msg.text)
             if parsed is not None:
                 cmd, cmd_args = parsed
-                self._handle_command(msg.sender, cmd, cmd_args)
+                self._trace.write("routing", rid, {"entscheidung": f"befehl:/{cmd}"})
+                self._handle_command(msg.sender, cmd, cmd_args, rid)
                 return
 
         # Ist dies eine Antwort auf einen ausstehenden Vorschlag?
         if msg.sender in self._pending and msg.text:
             text = msg.text.strip()
             if _YES.match(text):
-                self._confirm(msg.sender, indices=None)
+                self._trace.write("routing", rid, {"entscheidung": "bestätigung"})
+                self._confirm(msg.sender, indices=None, run_id=rid)
                 return
             if _NO.match(text):
-                self._reject(msg.sender)
+                self._trace.write("routing", rid, {"entscheidung": "ablehnung"})
+                self._reject(msg.sender, rid)
                 return
             if _NUMS.match(text):
                 sel = _parse_selection(text)
                 if sel:
-                    self._confirm(msg.sender, indices=sel)
+                    self._trace.write("routing", rid, {"entscheidung": "auswahl"})
+                    self._confirm(msg.sender, indices=sel, run_id=rid)
                     return
 
         # Quote-Reply auf offenen Vorschlag = Korrektur (Stufe A, Schritt 8.6).
         # Minimal-Variante: jede Zitat-Antwort bei offenem Vorschlag ist eindeutig
         # eine Korrektur — pro Absender ist maximal ein Vorschlag offen.
         if msg.quote_target_timestamp is not None and msg.sender in self._pending:
-            self._revise(msg.sender, msg)
+            self._trace.write("routing", rid, {"entscheidung": "korrektur"})
+            self._revise(msg.sender, msg, rid)
             return
 
         # Antwort auf eine offene Rückfrage (Text oder Sprache): mit dem
@@ -672,10 +691,14 @@ class Orchestrator:
         # (Schritt 8.13). Ein explizites "nein" verwirft die Rückfrage ohne LLM-Lauf.
         if msg.sender in self._pending_clarifications:
             if msg.text and _NO.match(msg.text.strip()):
-                self._discard_clarification(msg.sender)
+                self._trace.write("routing", rid, {"entscheidung": "rückfrage-ablehnung"})
+                self._discard_clarification(msg.sender, rid)
                 return
-            self._answer_clarification(msg.sender, msg=msg)
+            self._trace.write("routing", rid, {"entscheidung": "rückfrage-antwort"})
+            self._answer_clarification(msg.sender, msg=msg, run_id=rid)
             return
+
+        self._trace.write("routing", rid, {"entscheidung": "neue-notiz"})
 
         # Normaler Ablauf: Transkript holen → extrahieren → Vorschlag schicken
         # Sofort-Quittung — knappe Bestätigung vor der langsamen Verarbeitung
@@ -689,7 +712,7 @@ class Orchestrator:
         if transcript is None or not transcript.strip():
             return
 
-        result = dedupe_result(self._extract(transcript))
+        result = dedupe_result(self._extract(transcript, rid))
 
         if result.clarification:
             logger.info("Extraktion: Rückfrage gestellt")
@@ -702,6 +725,7 @@ class Orchestrator:
                 transcript=transcript,
                 question=result.clarification,
             )
+            self._trace.write("clarification_sent", rid, {"frage": result.clarification})
             self._channel.send(msg.sender, f"Rückfrage: {result.clarification}")
             return
 
@@ -711,10 +735,13 @@ class Orchestrator:
             return
 
         logger.info(
-            "Extraktion: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s)",
+            "Extraktion: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s), "
+            "%d Erledigung(en), %d Änderung(en)",
             len(result.contacts),
             len(result.tasks),
             len(result.project_updates),
+            len(result.completed),
+            len(result.edits),
         )
 
         proposal = PendingProposal(
@@ -722,7 +749,9 @@ class Orchestrator:
             transcript=transcript,
             result=result,
         )
-        proposal.sent_timestamp = self._channel.send(msg.sender, format_proposal(result))
+        proposal_text = format_proposal(result)
+        self._trace.write("proposal_sent", rid, {"text": proposal_text})
+        proposal.sent_timestamp = self._channel.send(msg.sender, proposal_text)
         self._pending[msg.sender] = proposal
 
     def run_once(self) -> None:
@@ -733,10 +762,16 @@ class Orchestrator:
         Absender wird eine knappe Meldung geschickt, danach geht es weiter.
         """
         for msg in self._channel.receive():
+            rid = new_run_id()
             try:
-                self.handle_message(msg)
-            except Exception:
+                self.handle_message(msg, run_id=rid)
+            except Exception as exc:
                 logger.exception("Fehler bei der Verarbeitung einer Nachricht von %s", msg.sender)
+                self._trace.write(
+                    "error",
+                    rid,
+                    {"exception_type": type(exc).__name__, "exception_text": str(exc)},
+                )
                 with contextlib.suppress(Exception):
                     self._channel.send(
                         msg.sender,
@@ -763,7 +798,7 @@ class Orchestrator:
     # Interne Methoden                                                         #
     # ---------------------------------------------------------------------- #
 
-    def _handle_reaction(self, msg: IncomingMessage) -> None:
+    def _handle_reaction(self, msg: IncomingMessage, run_id: str) -> None:
         """Tapback-Reaktion (👍/👎) auf Vorschlag oder Rückfrage auswerten.
 
         - 👍 auf Vorschlag → bestätigen; auf Rückfrage → als "Ja" beantworten.
@@ -773,23 +808,30 @@ class Orchestrator:
         emoji = msg.text
         if _is_affirmative_reaction(emoji):
             if msg.sender in self._pending:
-                self._confirm(msg.sender, indices=None)
+                self._trace.write("routing", run_id, {"entscheidung": "reaktion:bestätigung"})
+                self._confirm(msg.sender, indices=None, run_id=run_id)
             elif msg.sender in self._pending_clarifications:
-                self._answer_clarification(msg.sender, answer="Ja.")
+                self._trace.write("routing", run_id, {"entscheidung": "reaktion:rückfrage-ja"})
+                self._answer_clarification(msg.sender, answer="Ja.", run_id=run_id)
             else:
                 logger.info("Reaktion 👍 ignoriert (kein offener Vorschlag / keine Rückfrage)")
+                self._trace.write("routing", run_id, {"entscheidung": "reaktion:ignoriert"})
             return
         if _is_negative_reaction(emoji):
             if msg.sender in self._pending:
-                self._reject(msg.sender)
+                self._trace.write("routing", run_id, {"entscheidung": "reaktion:ablehnung"})
+                self._reject(msg.sender, run_id)
             elif msg.sender in self._pending_clarifications:
-                self._discard_clarification(msg.sender)
+                self._trace.write("routing", run_id, {"entscheidung": "reaktion:rückfrage-nein"})
+                self._discard_clarification(msg.sender, run_id)
             else:
                 logger.info("Reaktion 👎 ignoriert (kein offener Vorschlag / keine Rückfrage)")
+                self._trace.write("routing", run_id, {"entscheidung": "reaktion:ignoriert"})
             return
         logger.info("Reaktion ignoriert (neutrales Emoji)")
+        self._trace.write("routing", run_id, {"entscheidung": "reaktion:ignoriert"})
 
-    def _handle_command(self, sender: str, cmd: str, args: str) -> None:
+    def _handle_command(self, sender: str, cmd: str, args: str, run_id: str) -> None:
         """Deterministisches Slash-Command auswerten und Antwort senden (Schritt 8.15)."""
         logger.info("Kommando von %s: /%s %s", sender, cmd, args)
         if cmd == "offen":
@@ -830,7 +872,7 @@ class Orchestrator:
             return self._transcriber.transcribe(msg.audio_path)
         return msg.text
 
-    def _extract(self, transcript: str) -> ExtractionResult:
+    def _extract(self, transcript: str, run_id: str) -> ExtractionResult:
         """Zwei-Durchgang-Extraktion gegen temporäre In-Memory-Repos (Schritt 8.18).
 
         Bekannte Kontakt-/Projektnamen und offene Aufgaben aus dem echten Repository
@@ -850,7 +892,7 @@ class Orchestrator:
         known_names = get_known_names_context(self._repo)
         open_tasks = get_open_tasks_context(self._repo)
 
-        first = self._extract_first_pass(transcript, known_names, open_tasks)
+        first = self._extract_first_pass(transcript, known_names, open_tasks, run_id)
 
         # Rückfrage aus dem ersten Durchgang hat Vorrang — kein zweiter Lauf.
         if first.clarification:
@@ -863,15 +905,26 @@ class Orchestrator:
                 self._settings,
                 known_names_context=known_names,
                 open_tasks_context=open_tasks,
+                trace=self._trace,
+                run_id=run_id,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Zweiter Durchgang (Lücken-Prüfung) fehlgeschlagen — nutze Erstergebnis"
+            )
+            self._trace.write(
+                "error",
+                run_id,
+                {
+                    "phase": "gap_check",
+                    "exception_type": type(exc).__name__,
+                    "exception_text": str(exc),
+                },
             )
             return first
 
     def _extract_first_pass(
-        self, transcript: str, known_names: str, open_tasks: str
+        self, transcript: str, known_names: str, open_tasks: str, run_id: str
     ) -> ExtractionResult:
         """Erster Extraktionsdurchgang mit Retry bei transienten Fehlern.
 
@@ -890,6 +943,8 @@ class Orchestrator:
                     self._settings,
                     known_names_context=known_names,
                     open_tasks_context=open_tasks,
+                    trace=self._trace,
+                    run_id=run_id,
                 )
             except Exception as exc:
                 last_exc = exc
@@ -903,23 +958,33 @@ class Orchestrator:
                     time.sleep(self._retry_delay)
         raise last_exc
 
-    def _confirm(self, sender: str, indices: list[int] | None) -> None:
+    def _confirm(self, sender: str, indices: list[int] | None, run_id: str) -> None:
         proposal = self._pending.pop(sender)
         count = persist_result(proposal.result, indices, self._repo, self._log_dir)
+        labels = [
+            label
+            for i, (label, _) in enumerate(_result_items(proposal.result))
+            if indices is None or i in indices
+        ]
         logger.info("Persistiert: %d Eintrag/Einträge für %s", count, sender)
+        self._trace.write("confirmed", run_id, {"indices": indices})
+        self._trace.write("persisted", run_id, {"count": count, "labels": labels})
         self._channel.send(sender, f"✅ {count} Eintrag/Einträge gespeichert.")
 
-    def _reject(self, sender: str) -> None:
+    def _reject(self, sender: str, run_id: str) -> None:
         self._pending.pop(sender)
+        self._trace.write("rejected", run_id, {})
         self._channel.send(sender, "Verworfen. Keine Änderungen gespeichert.")
 
-    def _discard_clarification(self, sender: str) -> None:
+    def _discard_clarification(self, sender: str, run_id: str) -> None:
         self._pending_clarifications.pop(sender, None)
+        self._trace.write("rejected", run_id, {})
         self._channel.send(sender, "Verworfen. Keine Änderungen gespeichert.")
 
     def _answer_clarification(
         self,
         sender: str,
+        run_id: str,
         answer: str | None = None,
         msg: IncomingMessage | None = None,
     ) -> None:
@@ -962,10 +1027,21 @@ class Orchestrator:
                     known_names_context=known_names,
                     open_tasks_context=open_tasks,
                     history=pending.history,
+                    trace=self._trace,
+                    run_id=run_id,
                 )
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Fehler beim Rückfrage-Antwort-Lauf für %s", sender)
+            self._trace.write(
+                "error",
+                run_id,
+                {
+                    "phase": "clarification_response",
+                    "exception_type": type(exc).__name__,
+                    "exception_text": str(exc),
+                },
+            )
             self._channel.send(
                 sender,
                 "⚠ Beim Verarbeiten der Antwort ist ein Fehler aufgetreten. Bitte erneut.",
@@ -984,6 +1060,7 @@ class Orchestrator:
                 question=result.clarification,
                 history=new_history,
             )
+            self._trace.write("clarification_sent", run_id, {"frage": result.clarification})
             self._channel.send(sender, f"Rückfrage: {result.clarification}")
             return
 
@@ -999,16 +1076,21 @@ class Orchestrator:
         proposal = PendingProposal(
             sender=sender, transcript=pending.transcript, result=result, history=new_history
         )
-        proposal.sent_timestamp = self._channel.send(sender, format_proposal(result))
+        proposal_text = format_proposal(result)
+        self._trace.write("proposal_sent", run_id, {"text": proposal_text})
+        proposal.sent_timestamp = self._channel.send(sender, proposal_text)
         self._pending[sender] = proposal
         logger.info(
-            "Rückfrage-Antwort: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s)",
+            "Rückfrage-Antwort: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s), "
+            "%d Erledigung(en), %d Änderung(en)",
             len(result.contacts),
             len(result.tasks),
             len(result.project_updates),
+            len(result.completed),
+            len(result.edits),
         )
 
-    def _revise(self, sender: str, msg: IncomingMessage) -> None:
+    def _revise(self, sender: str, msg: IncomingMessage, run_id: str) -> None:
         """Korrektur-Lauf: revidiert den offenen Vorschlag anhand der Quote-Reply.
 
         Die Nutzerin zitiert den Vorschlag und schreibt (oder spricht) die Korrektur.
@@ -1044,10 +1126,21 @@ class Orchestrator:
                     known_names_context=known_names,
                     open_tasks_context=open_tasks,
                     history=proposal.history,
+                    trace=self._trace,
+                    run_id=run_id,
                 )
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Fehler beim Korrektur-Lauf für %s", sender)
+            self._trace.write(
+                "error",
+                run_id,
+                {
+                    "phase": "revision",
+                    "exception_type": type(exc).__name__,
+                    "exception_text": str(exc),
+                },
+            )
             self._channel.send(
                 sender,
                 "⚠ Beim Überarbeiten ist ein Fehler aufgetreten. Bitte neu einsprechen.",
@@ -1056,6 +1149,7 @@ class Orchestrator:
 
         if revised.clarification:
             logger.info("Korrektur-Lauf: Rückfrage gestellt")
+            self._trace.write("clarification_sent", run_id, {"frage": revised.clarification})
             self._channel.send(sender, f"Rückfrage: {revised.clarification}")
             return
 
@@ -1074,11 +1168,16 @@ class Orchestrator:
             result=revised,
             history=[*proposal.history, ("Korrektur", correction_text)],
         )
-        new_proposal.sent_timestamp = self._channel.send(sender, format_proposal(revised))
+        proposal_text = format_proposal(revised)
+        self._trace.write("proposal_sent", run_id, {"text": proposal_text})
+        new_proposal.sent_timestamp = self._channel.send(sender, proposal_text)
         self._pending[sender] = new_proposal
         logger.info(
-            "Korrektur-Lauf: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s)",
+            "Korrektur-Lauf: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s), "
+            "%d Erledigung(en), %d Änderung(en)",
             len(revised.contacts),
             len(revised.tasks),
             len(revised.project_updates),
+            len(revised.completed),
+            len(revised.edits),
         )
