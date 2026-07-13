@@ -1345,7 +1345,16 @@ def test_command_erledigt_without_id_shows_usage_hint(
 def test_command_hilfe_lists_all_commands(orc: Orchestrator, channel: MemoryChannel) -> None:
     orc.handle_message(IncomingMessage(sender=SENDER, text="/hilfe"))
     text = channel.sent[0][1]
-    for cmd in ("/offen", "/dringend", "/kontakte", "/projekte", "/erledigt", "/hilfe"):
+    for cmd in (
+        "/offen",
+        "/dringend",
+        "/kontakte",
+        "/projekte",
+        "/erledigt",
+        "/loeschen",
+        "/zuruecksetzen",
+        "/hilfe",
+    ):
         assert cmd in text
 
 
@@ -1398,6 +1407,244 @@ def test_plain_text_starting_without_slash_is_not_a_command(
     with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
         orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
     assert SENDER in orc._pending
+
+
+# ---------------------------------------------------------------------------
+# Löschen von Einträgen (Schritt 8.22)
+# ---------------------------------------------------------------------------
+
+
+def test_command_loeschen_kontakt_shows_preview_and_waits_for_confirmation(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen kontakt {contact.id}"))
+
+    text = channel.sent[0][1]
+    assert "Familie Müller" in text
+    assert "löschen" in text.lower()
+    assert SENDER in orc._pending_deletions
+    assert repo.get_contact_by_name("Familie Müller") is not None  # noch nicht gelöscht
+
+
+def test_command_loeschen_kontakt_unknown_id_gives_friendly_message(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/loeschen kontakt 999"))
+    text = channel.sent[0][1]
+    assert "999" in text
+    assert "gefunden" in text.lower()
+    assert SENDER not in orc._pending_deletions
+
+
+def test_command_loeschen_without_valid_args_shows_usage_hint(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/loeschen"))
+    text = channel.sent[0][1]
+    assert "loeschen" in text.lower()
+    assert SENDER not in orc._pending_deletions
+
+
+def test_command_loeschen_projekt_preview_mentions_task_count(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    project = repo.get_or_create_project("Kräutergarten")
+    assert project.id is not None
+    repo.create_task(Task(title="Beete anlegen", project_id=project.id))
+    repo.create_task(Task(title="Kräuter kaufen", project_id=project.id))
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen projekt {project.id}"))
+
+    text = channel.sent[0][1]
+    assert "Kräutergarten" in text
+    assert "2" in text
+
+
+def test_command_loeschen_aufgabe_unknown_id_gives_friendly_message(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/loeschen aufgabe 999"))
+    text = channel.sent[0][1]
+    assert "999" in text
+    assert "gefunden" in text.lower()
+
+
+def test_confirm_loeschen_kontakt_deletes_it(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen kontakt {contact.id}"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    assert SENDER not in orc._pending_deletions
+    assert repo.get_contact_by_name("Familie Müller") is None
+    assert "✅" in channel.sent[0][1]
+
+
+def test_confirm_loeschen_projekt_cascades_tasks(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    project = repo.get_or_create_project("Kräutergarten")
+    assert project.id is not None
+    task = repo.create_task(Task(title="Beete anlegen", project_id=project.id))
+    assert task.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen projekt {project.id}"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="👍", is_reaction=True))
+
+    assert repo.get_task_by_id(task.id) is None
+
+
+def test_confirm_loeschen_aufgabe_deletes_task(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    task = repo.create_task(Task(title="Weg damit"))
+    assert task.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen aufgabe {task.id}"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    assert repo.get_task_by_id(task.id) is None
+
+
+def test_reject_loeschen_nein_keeps_entry(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen kontakt {contact.id}"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="nein"))
+
+    assert SENDER not in orc._pending_deletions
+    assert "Verworfen" in channel.sent[0][1]
+    assert repo.get_contact_by_name("Familie Müller") is not None
+
+
+def test_loeschen_thumbsdown_rejects(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    task = repo.create_task(Task(title="Bleib bitte"))
+    assert task.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen aufgabe {task.id}"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="👎", is_reaction=True))
+
+    assert SENDER not in orc._pending_deletions
+    assert repo.get_task_by_id(task.id) is not None
+
+
+def test_confirm_loeschen_race_already_gone_gives_friendly_message(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Zwischen Vorschau und Bestätigung anderweitig gelöscht → freundliche Meldung,
+    kein Absturz (analog zum Race-Handling in ``persist_result``)."""
+    task = repo.create_task(Task(title="Wird zwischendurch gelöscht"))
+    assert task.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen aufgabe {task.id}"))
+    channel.sent.clear()
+    repo.delete_task(task.id)
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    assert SENDER not in orc._pending_deletions
+    assert "nicht mehr vorhanden" in channel.sent[0][1]
+
+
+def test_command_zuruecksetzen_shows_totals_and_waits_for_confirmation(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    repo.get_or_create_project("Kräutergarten")
+    repo.create_task(Task(title="Beete anlegen"))
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/zuruecksetzen"))
+
+    text = channel.sent[0][1]
+    assert "1 Kontakt" in text
+    assert "1 Projekt" in text
+    assert "1 Aufgabe" in text
+    assert SENDER in orc._pending_deletions
+
+
+def test_command_zuruecksetzen_on_empty_db_gives_message_without_pending(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/zuruecksetzen"))
+    assert SENDER not in orc._pending_deletions
+    assert "nichts gespeichert" in channel.sent[0][1].lower()
+
+
+def test_confirm_zuruecksetzen_clears_everything(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    repo.get_or_create_project("Kräutergarten")
+    repo.create_task(Task(title="Beete anlegen"))
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/zuruecksetzen"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    assert repo.get_all_contacts() == []
+    assert repo.get_all_projects() == []
+    assert repo.get_all_tasks() == []
+    assert "✅" in channel.sent[0][1]
+
+
+def test_loeschen_command_discards_open_proposal(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Ein Lösch-Command verwirft einen offenen Vorschlag — nie zwei Dialoge gleichzeitig."""
+    task = repo.create_task(Task(title="Zu löschen"))
+    assert task.id is not None
+    _prime_pending(orc, channel)
+    assert SENDER in orc._pending
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen aufgabe {task.id}"))
+
+    assert SENDER not in orc._pending
+    assert SENDER in orc._pending_deletions
+
+
+def test_loeschen_command_discards_open_clarification(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    task = repo.create_task(Task(title="Zu löschen"))
+    assert task.id is not None
+    _prime_clarification(orc, channel)
+    assert SENDER in orc._pending_clarifications
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen aufgabe {task.id}"))
+
+    assert SENDER not in orc._pending_clarifications
+    assert SENDER in orc._pending_deletions
+
+
+def test_new_note_while_pending_deletion_drops_it(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """Eine neue Notiz (kein ja/nein) beendet eine noch unbeantwortete Lösch-Bestätigung."""
+    task = repo.create_task(Task(title="Zu löschen"))
+    assert task.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen aufgabe {task.id}"))
+    assert SENDER in orc._pending_deletions
+
+    with patch("kollege.orchestrator.run_extraction", return_value=_result_task()):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Neue Notiz"))
+
+    assert SENDER not in orc._pending_deletions
+    assert repo.get_task_by_id(task.id) is not None  # nicht versehentlich gelöscht
 
 
 # ---------------------------------------------------------------------------

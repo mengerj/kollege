@@ -358,6 +358,77 @@ class Repository:
             raise ValueError(f"Task {task_id} nicht gefunden")
         return result
 
+    def get_task_by_id(self, task_id: int) -> Task | None:
+        """Aufgabe per ID (öffentlich, unabhängig vom Status) — für Lösch-Vorschauen."""
+        return self._get_task_by_id(task_id)
+
+    @_synchronized
+    def get_tasks_by_project(self, project_id: int) -> list[Task]:
+        """Alle Aufgaben eines Projekts — für die Cascade-Vorschau beim Projekt-Löschen."""
+        rows = self._conn.execute(
+            "SELECT * FROM tasks WHERE project_id = ?", (project_id,)
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
+
+    # ------------------------------------------------------------------ #
+    # Löschverben (Schritt 8.22)                                           #
+    # ------------------------------------------------------------------ #
+    #
+    # Löschen ist destruktiv und selten — bewusst nicht über die LLM-Extraktion,
+    # sondern nur über deterministische Slash-Commands mit Zwei-Schritt-
+    # Bestätigung erreichbar (siehe orchestrator.py). Referentielle Konsequenzen:
+    # ein gelöschter Kontakt löst nur die Zuordnung (Projekte/Aufgaben bleiben —
+    # Notizbuch-Prinzip: ergänzen, nicht ersetzen); ein gelöschtes Projekt reißt
+    # seine Aufgaben mit (sie gehören inhaltlich dazu, ein verwaister Rest wäre
+    # verwirrender als ihr Wegfall).
+
+    @_synchronized
+    def delete_contact(self, contact_id: int) -> None:
+        """Kontakt löschen; Referenzen in Projekten/Aufgaben werden gelöst (nicht mitgelöscht).
+
+        ``ValueError`` bei unbekannter ID.
+        """
+        if self.get_contact_by_id(contact_id) is None:
+            raise ValueError(f"Kontakt {contact_id} nicht gefunden")
+        self._conn.execute(
+            "UPDATE projects SET contact_id = NULL WHERE contact_id = ?", (contact_id,)
+        )
+        self._conn.execute("UPDATE tasks SET contact_id = NULL WHERE contact_id = ?", (contact_id,))
+        self._conn.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
+        self._conn.commit()
+
+    @_synchronized
+    def delete_project(self, project_id: int) -> None:
+        """Projekt löschen inkl. aller zugehörigen Aufgaben (Cascade).
+
+        ``ValueError`` bei unbekannter ID.
+        """
+        if self._get_project_by_id(project_id) is None:
+            raise ValueError(f"Projekt {project_id} nicht gefunden")
+        self._conn.execute("DELETE FROM tasks WHERE project_id = ?", (project_id,))
+        self._conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        self._conn.commit()
+
+    @_synchronized
+    def delete_task(self, task_id: int) -> None:
+        """Einzelne Aufgabe löschen. ``ValueError`` bei unbekannter ID."""
+        if self._get_task_by_id(task_id) is None:
+            raise ValueError(f"Aufgabe {task_id} nicht gefunden")
+        self._conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self._conn.commit()
+
+    @_synchronized
+    def reset_all(self) -> None:
+        """Alle Kontakte, Projekte und Aufgaben löschen (Testdaten-Reset).
+
+        Reihenfolge wegen Fremdschlüsseln: Aufgaben zuerst (referenzieren Projekte/
+        Kontakte), dann Projekte (referenzieren Kontakte), dann Kontakte.
+        """
+        self._conn.execute("DELETE FROM tasks")
+        self._conn.execute("DELETE FROM projects")
+        self._conn.execute("DELETE FROM contacts")
+        self._conn.commit()
+
     # ------------------------------------------------------------------ #
     # Queries                                                              #
     # ------------------------------------------------------------------ #
@@ -394,6 +465,12 @@ class Repository:
         """Alle Projekte – für die Rekonstruktion nach Tool-Only-Läufen."""
         rows = self._conn.execute("SELECT * FROM projects").fetchall()
         return [self._row_to_project(r) for r in rows]
+
+    @_synchronized
+    def get_all_tasks(self) -> list[Task]:
+        """Alle Aufgaben unabhängig vom Status — für Lösch-Vorschauen (Schritt 8.22)."""
+        rows = self._conn.execute("SELECT * FROM tasks").fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     @_synchronized
     def list_contacts(self) -> list[Contact]:

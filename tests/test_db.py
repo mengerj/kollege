@@ -335,6 +335,116 @@ def test_update_task_preserves_status(repo: Repository) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Löschverben (Schritt 8.22)                                                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_delete_task_removes_it(repo: Repository) -> None:
+    task = repo.create_task(Task(title="Weg damit"))
+    assert task.id is not None
+
+    repo.delete_task(task.id)
+
+    assert repo.get_task_by_id(task.id) is None
+
+
+def test_delete_task_unknown_id_raises(repo: Repository) -> None:
+    with pytest.raises(ValueError, match="nicht gefunden"):
+        repo.delete_task(999)
+
+
+def test_delete_contact_removes_it(repo: Repository) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+
+    repo.delete_contact(contact.id)
+
+    assert repo.get_contact_by_id(contact.id) is None
+
+
+def test_delete_contact_unknown_id_raises(repo: Repository) -> None:
+    with pytest.raises(ValueError, match="nicht gefunden"):
+        repo.delete_contact(999)
+
+
+def test_delete_contact_unlinks_but_keeps_project_and_task(repo: Repository) -> None:
+    """Referentielle Regel: Kontakt-Löschen löst die Zuordnung, löscht aber keine
+    Projekte/Aufgaben mit (Notizbuch-Prinzip — ergänzen, nicht ersetzen)."""
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+    project = repo.get_or_create_project("Gartenzaun", contact_id=contact.id)
+    task = repo.create_task(Task(title="Zaun streichen", contact_id=contact.id))
+    assert task.id is not None
+
+    repo.delete_contact(contact.id)
+
+    reloaded_project = repo._get_project_by_id(project.id)  # type: ignore[arg-type]
+    assert reloaded_project is not None
+    assert reloaded_project.contact_id is None
+    reloaded_task = repo.get_task_by_id(task.id)
+    assert reloaded_task is not None
+    assert reloaded_task.contact_id is None
+
+
+def test_delete_project_removes_it(repo: Repository) -> None:
+    project = repo.get_or_create_project("Kräutergarten")
+    assert project.id is not None
+
+    repo.delete_project(project.id)
+
+    assert repo._get_project_by_id(project.id) is None
+
+
+def test_delete_project_unknown_id_raises(repo: Repository) -> None:
+    with pytest.raises(ValueError, match="nicht gefunden"):
+        repo.delete_project(999)
+
+
+def test_delete_project_cascades_to_its_tasks(repo: Repository) -> None:
+    """Referentielle Regel: Projekt-Löschen löscht zugehörige Aufgaben mit —
+    sie gehören inhaltlich zum Projekt, ein verwaister Rest wäre verwirrend."""
+    project = repo.get_or_create_project("Kräutergarten")
+    assert project.id is not None
+    task = repo.create_task(Task(title="Beete anlegen", project_id=project.id))
+    assert task.id is not None
+    other_task = repo.create_task(Task(title="Ohne Projekt"))
+    assert other_task.id is not None
+
+    repo.delete_project(project.id)
+
+    assert repo.get_task_by_id(task.id) is None
+    assert repo.get_task_by_id(other_task.id) is not None  # unbeteiligte Aufgabe bleibt
+
+
+def test_get_tasks_by_project_returns_only_matching(repo: Repository) -> None:
+    project = repo.get_or_create_project("Kräutergarten")
+    assert project.id is not None
+    task = repo.create_task(Task(title="Beete anlegen", project_id=project.id))
+    repo.create_task(Task(title="Ohne Projekt"))
+
+    tasks = repo.get_tasks_by_project(project.id)
+
+    assert [t.id for t in tasks] == [task.id]
+
+
+def test_reset_all_clears_everything(repo: Repository) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    repo.get_or_create_project("Kräutergarten", contact_id=contact.id)
+    repo.create_task(Task(title="Beete anlegen"))
+
+    repo.reset_all()
+
+    assert repo.get_all_contacts() == []
+    assert repo.get_all_projects() == []
+    assert repo.get_all_tasks() == []
+
+
+def test_reset_all_on_empty_repo_does_not_raise(repo: Repository) -> None:
+    repo.reset_all()
+    assert repo.get_all_tasks() == []
+
+
+# --------------------------------------------------------------------------- #
 # Factory                                                                       #
 # --------------------------------------------------------------------------- #
 

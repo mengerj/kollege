@@ -773,3 +773,72 @@ soll im Nachhinein vier Fragen vollständig beantworten:
   328 Tests: neue [`test_trace.py`](tests/test_trace.py),
   [`test_show_trace.py`](tests/test_show_trace.py), Erweiterungen in
   `test_agent.py`/`test_orchestrator.py`/`test_config.py`).
+
+---
+
+### Schritt 8.22 — Löschen von Einträgen (Kontakte/Projekte/Aufgaben) ✅
+
+**Motiv (aus Live-Test 2026-07-03, Trace `data/traces/2026-07-03.jsonl`).** Die
+Nutzerin bat *„Lösche alle gespeicherten Kontakte und Projekte"*. Das Modell
+stellte korrekt eine Rückfrage (destruktive Aktion), auf *„Alles. Das waren bis
+jetzt nur Tests"* lief der `clarification_response`-Lauf aber ins **Leere**: ein
+komplett leeres `ExtractionResult`, **keine Aktion, keine Rückmeldung**. Ursache:
+Es existierte **keine Lösch-Funktion** — weder ein Repository-Verb noch ein
+Command noch ein Tool. Das `ExtractionResult`-Schema kann „Löschen" gar nicht
+ausdrücken, also verschwand die Absicht kommentarlos — ein Vertrauensbruch
+(Prinzip 3/6): die Nutzerin dachte, etwas sei passiert.
+
+**Designentscheidung — deterministisch per Slash-Command, nicht über die
+LLM-Extraktion.** Löschen ist destruktiv und selten; es gehört **nicht** in den
+probabilistischen Extraktionspfad (Über-/Fehl-Löschung wäre fatal). Konsistent zu
+Schritt 8.15 (Queries = deterministische Commands ohne LLM-Entscheidungsdruck).
+
+**Umgesetzt.**
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)):
+  `delete_contact(id)`, `delete_project(id)`, `delete_task(id)`, `reset_all()`
+  sowie die Hilfsmethoden `get_task_by_id`, `get_tasks_by_project`,
+  `get_all_tasks`. Referentielle Regeln bewusst asymmetrisch festgelegt:
+  ein gelöschter **Kontakt** löst nur die Zuordnung (`contact_id` auf
+  Projekten/Aufgaben wird `NULL`, nichts wird mitgelöscht — Notizbuch-Prinzip:
+  ergänzen, nicht ersetzen); ein gelöschtes **Projekt** reißt seine Aufgaben mit
+  (Cascade — sie gehören inhaltlich dazu, ein verwaister Rest wäre verwirrender
+  als ihr Wegfall). Unbekannte IDs werfen `ValueError` (wie bei
+  `update_task`/`mark_task_done`).
+- **Deutsche Commands** ([`orchestrator.py`](src/kollege/orchestrator.py)):
+  `/loeschen kontakt|projekt|aufgabe <id>` und `/zuruecksetzen` (alles), im
+  bestehenden Dispatcher.
+- **Zwei-Schritt-Bestätigung (Prinzip 3):** neuer Pending-Zustand
+  `PendingDeletion` (dritter, exklusiver Zustand neben `PendingProposal`/
+  `PendingClarification` — genau einer pro Absender). Die Commands zeigen zuerst
+  eine Vorschau (Name/Titel; bei einem Projekt zusätzlich die Anzahl
+  mitgelöschter Aufgaben) und warten auf ein explizites 👍/„ja" (auch als
+  Tapback-Reaktion); „nein"/👎 verwirft. Eine neue, unbeantwortete Notiz lässt
+  eine offene Lösch-Bestätigung stillschweigend verfallen (wie beim Ersetzen
+  eines offenen `PendingProposal`); ein Race (Ziel zwischen Vorschau und
+  Bestätigung anderweitig verschwunden) wird freundlich gemeldet statt
+  abzustürzen.
+- **Extraktionspfad gesprächsfähig, aber löschfrei**
+  ([`agent/__init__.py`](src/kollege/agent/__init__.py)): neuer Absatz im
+  System-Prompt weist das Modell an, bei erkannter Lösch-Absicht **nichts**
+  anzulegen und **kein** Tool aufzurufen, sondern das `clarification`-Feld mit
+  einem Hinweis auf die passenden Commands zu setzen — damit eine Lösch-Absicht
+  nie mehr stumm im Leeren endet.
+- `/hilfe` listet die neuen Commands.
+
+**Bewusst nicht im Scope.** Fuzzy-Matching/Mehrfachauswahl beim Löschen (z. B.
+„lösche alle Aufgaben von Müller"), Undo/Soft-Delete — reine ID-basierte
+Einzel-Löschung plus `reset_all()` für die Testdaten-Situation reicht für den
+aktuellen Bedarf.
+
+**DoD.** ✅
+- ✅ Repository-Löschverben test-driven (In-Memory-SQLite; referentielle Regeln
+  für Kontakt-Unlink vs. Projekt-Cascade geprüft, inkl. unbekannter IDs).
+- ✅ Commands im Dispatcher mit Zwei-Schritt-Bestätigung getestet (Vorschau,
+  ja/nein, 👍/👎-Tapback, Race-Handling, Invarianten-Tests: Lösch-Command
+  verwirft offenen Vorschlag/offene Rückfrage; neue Notiz verwirft offene
+  Lösch-Bestätigung).
+- ✅ Extraktionspfad bleibt löschfrei; System-Prompt-Instruktion durch
+  Regressionstest abgesichert (echte LLM-Verifikation nicht in CI, siehe
+  CLAUDE.md).
+- ✅ `/hilfe` listet `/loeschen` und `/zuruecksetzen`.
+- ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 357 Tests).

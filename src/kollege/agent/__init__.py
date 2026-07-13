@@ -196,6 +196,16 @@ unveränderte Felder bleiben leer. Nur bei eindeutiger Zuordnung zu genau einer 
 bei Unsicherheit/Mehrdeutigkeit stattdessen clarification setzen. Ohne Liste offener
 Aufgaben im Kontext bleibt edits leer.
 
+Beschreibt der Text eine **Lösch-Absicht** (z. B. „Lösche den Kontakt Müller",
+„die Aufgabe ist Quatsch, weg damit", „setz alles zurück"), lege dafür **nichts**
+an, rufe kein Tool auf und rate nicht, was gemeint ist — Löschen läuft
+ausschließlich über die deterministischen Commands /loeschen kontakt <id>,
+/loeschen projekt <id>, /loeschen aufgabe <id> und /zuruecksetzen (alles),
+niemals über diese Extraktion. Setze stattdessen das clarification-Feld mit
+einem Hinweis auf den passenden Command, damit die Lösch-Absicht nicht
+stillschweigend ins Leere läuft (z. B. „Zum Löschen nutze bitte /loeschen
+kontakt, projekt oder aufgabe <id>, oder /zuruecksetzen für alles.").
+
 Erfasse so **wenige, klar getrennte** Einträge wie möglich:
 - Lege pro echter Aufgabe **genau eine** Aufgabe an. Zerlege einen Satz nicht in
   mehrere überlappende Aufgaben und lege **keine Duplikate** an.
