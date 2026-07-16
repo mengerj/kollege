@@ -31,9 +31,17 @@ Ort-Bezüge aus 8.26 anzeigen soll). **8.23** (Token-Sparen) bleibt offen und
 jederzeit automatisch anschließbar — blockiert die Testphase nicht; nach 8.26
 wächst der Prompt-Kontext sogar, was 8.23 relevanter macht.
 
-**Offene Punkte.** AVV mit Mistral formal abschließen (organisatorisch, 17);
-Ort-Verknüpfung FK vs. n:m wird in 8.26 entschieden; Scheduler-Wahl
-(APScheduler vs. eigener Ticker) in 8.27.
+**Nachtrag (gleiche Session):** Tracing wird in der Testphase **nicht**
+abgeschaltet, sondern per **informierter Einwilligung** der Nutzerin gedeckt
+(2 Wochen Monitoring, Löschzusage danach, Migrations-Ausnahme bei
+Fortsetzung). Einwilligungs-/Informationsdokument (deutsch) erstellt:
+`docs/privat/Einwilligung_Testphase.md` — Ordner `docs/privat/` ist
+**gitignored**. 8.24 entsprechend angepasst (Log-Hygiene bleibt, Trace-Aus
+gestrichen; DoD um DPA/Verifikation der Mistral-Aussagen ergänzt).
+
+**Offene Punkte.** DPA/AVV mit Mistral abschließen + Mistral-Aussagen in der
+Einwilligung verifizieren (in 8.24); Ort-Verknüpfung FK vs. n:m wird in 8.26
+entschieden; Scheduler-Wahl (APScheduler vs. eigener Ticker) in 8.27.
 
 ---
 

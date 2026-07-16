@@ -206,29 +206,39 @@ bleibt in **9.1**, hier nur der Minimal-Vorgriff.
   EU-Server, AVV möglich). Gleiches Modell wie bisher, nur ohne den Umweg über
   OpenRouter (US-Intermediär, siehe 9.1-Landschaft). Key via `.env`
   (`KOLLEGE_MISTRAL_API_KEY`). OpenRouter bleibt als Benchmark-Backend erhalten.
-- **Log-/Trace-Hygiene:** `kollege.log` und Konsolen-Logging auf
-  personenbezogene Volltexte prüfen (Transkript-Volltext raus oder auf
-  DEBUG-Level absenken); `KOLLEGE_TRACE` bleibt in der Testphase **aus**
-  (Traces enthalten Prompts mit Personendaten); Aufbewahrung/Löschung alter
-  Traces und Logs kurz regeln (manuelles Lösch-Skript oder dokumentierte Regel
-  reicht).
+- **Tracing bleibt AN — aber mit informierter Einwilligung** (Entscheidung
+  Nutzer 2026-07-16): Ohne Traces ist Verbessern im Blindflug; statt sie
+  abzuschalten wird die Nutzerin transparent informiert und willigt schriftlich
+  ein (Monitoring während der 2-wöchigen Testphase, Löschzusage danach,
+  Migrations-Ausnahme bei Fortsetzung). Dokument liegt vor:
+  `docs/privat/Einwilligung_Testphase.md` (gitignored). Vor Übergabe: Mistral-
+  Datenverarbeitungs-Aussagen darin verifizieren (Privacy Policy/DPA
+  „La Plateforme": kein Training auf API-Daten, temporäre Speicherung/
+  Missbrauchskontrolle, EU-Hosting) und AVV/DPA im Mistral-Konto abschließen.
+- **Log-Hygiene:** `kollege.log` und Konsolen-Logging auf personenbezogene
+  Volltexte prüfen (Transkript-Volltext raus oder auf DEBUG-Level absenken);
+  Aufbewahrung/Löschung alter Traces und Logs kurz regeln — konsistent mit der
+  Löschzusage aus der Einwilligung (spätestens 2 Wochen nach Testphasen-Ende
+  alles löschen; manuelles Lösch-Skript oder dokumentierte Regel reicht).
 - **Onboarding-Checkliste für die Nutzerin** (kurzes Doc in `docs/`):
   QR-Verknüpfung Schritt für Schritt (Token läuft nach wenigen Minuten ab →
   **gemeinsam live** machen, QR nicht per Mail/Chat vorab verschicken),
   KI-Transparenz-Hinweis (was der Bot ist, was gespeichert wird, wo),
-  Host-Laptop: FileVault aktiv, Bildschirmsperre. Hinweis dokumentieren, dass
-  als Linked Device technisch **alle** Nachrichten ihres Kontos am Laptop
-  ankommen, der Bot aber nur Note-to-Self verarbeitet und Fremd-`dataMessage`
-  verwirft (Verhalten aus 8.5, siehe
-  [live-testing-guide.md](docs/live-testing-guide.md) §Stolpersteine).
+  Einwilligung unterschreiben lassen (siehe oben), Host-Laptop: FileVault
+  aktiv, Bildschirmsperre. Hinweis dokumentieren, dass als Linked Device
+  technisch **alle** Nachrichten ihres Kontos am Laptop ankommen, der Bot aber
+  nur Note-to-Self verarbeitet und Fremd-`dataMessage` verwirft (Verhalten aus
+  8.5, siehe [live-testing-guide.md](docs/live-testing-guide.md)
+  §Stolpersteine).
 
-**Bewusst nicht im Scope.** AVV formal abschließen (organisatorisch, siehe 17);
-weitere Anbieter; Trace-Anonymisierung (Traces bleiben schlicht aus).
+**Bewusst nicht im Scope.** Weitere Anbieter; Trace-Anonymisierung (Einsicht
+ist durch die Einwilligung gedeckt, Löschfrist geregelt).
 
 **DoD.** Produktivbetrieb läuft mit Mistral direkt (OpenRouter nur noch fürs
-Benchmarking); keine Personendaten-Volltexte auf INFO-Level in `kollege.log`;
-Retention-Regel für Logs/Traces notiert; Onboarding-/Datenschutz-Checkliste in
-`docs/` vorhanden; CI-Kette grün.
+Benchmarking); Mistral-Aussagen in der Einwilligung verifiziert + DPA/AVV
+abgeschlossen; keine Personendaten-Volltexte auf INFO-Level in `kollege.log`;
+Retention-Regel für Logs/Traces konsistent zur Löschzusage notiert;
+Onboarding-/Datenschutz-Checkliste in `docs/` vorhanden; CI-Kette grün.
 
 ### Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar ⬜
 
