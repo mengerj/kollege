@@ -189,11 +189,22 @@ class Repository:
     # ------------------------------------------------------------------ #
 
     @_synchronized
+    def get_project_by_title(self, title: str) -> Project | None:
+        """Projekt per Titel (öffentlich, exakter Abgleich), ohne es anzulegen.
+
+        Nicht-anlegende Variante von ``get_or_create_project`` — genutzt, um vor
+        dem Anlegen zu prüfen, ob ein referenziertes Projekt bereits existiert
+        (Neu-Markierung im Vorschlag/in der Bestätigung, Schritt 8.25).
+        """
+        row = self._conn.execute("SELECT * FROM projects WHERE title = ?", (title,)).fetchone()
+        return self._row_to_project(row) if row is not None else None
+
+    @_synchronized
     def get_or_create_project(self, title: str, contact_id: int | None = None) -> Project:
         """Hole vorhandenes Projekt per Titel oder lege neues an."""
-        row = self._conn.execute("SELECT * FROM projects WHERE title = ?", (title,)).fetchone()
-        if row is not None:
-            return self._row_to_project(row)
+        existing = self.get_project_by_title(title)
+        if existing is not None:
+            return existing
 
         now = _now()
         cur = self._conn.execute(

@@ -268,9 +268,9 @@ def test_persist_result_completion_marks_task_done(log_dir: Path) -> None:
         completed=[ExtractedCompletion(task_id=task.id, task_title=task.title)]
     )
 
-    count = persist_result(result, None, repo, log_dir)
+    summary = persist_result(result, None, repo, log_dir)
 
-    assert count == 1
+    assert summary.count == 1
     assert repo.query_open_items() == []
 
 
@@ -279,9 +279,9 @@ def test_persist_result_completion_unknown_task_id_is_skipped(log_dir: Path) -> 
     repo = _repo()
     result = ExtractionResult(completed=[ExtractedCompletion(task_id=999, task_title="Nicht da")])
 
-    count = persist_result(result, None, repo, log_dir)
+    summary = persist_result(result, None, repo, log_dir)
 
-    assert count == 0
+    assert summary.count == 0
 
 
 # ---------------------------------------------------------------------------

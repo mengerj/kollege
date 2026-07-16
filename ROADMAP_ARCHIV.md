@@ -842,3 +842,57 @@ aktuellen Bedarf.
   CLAUDE.md).
 - ✅ `/hilfe` listet `/loeschen` und `/zuruecksetzen`.
 - ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 357 Tests).
+
+### Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar ✅
+
+**Motiv (Live-Beobachtung Nutzer).** Legt eine Aufgabe implizit ein neues
+Projekt an (`get_or_create_project` in `persist_result`), tauchte das weder im
+Vorschlag noch in der Bestätigung auf — gezählt und angezeigt wurden nur die
+`_result_items` (Kontakte/Aufgaben/Projekt-Updates/…). Die Nutzerin erfuhr
+nicht, dass ein Projekt entstanden ist → Human-in-the-loop-Lücke
+(Designprinzip 3): sie bestätigte etwas, dessen Nebeneffekt sie nicht sah.
+
+**Umgesetzt.**
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)):
+  nicht-anlegende `get_project_by_title(title)` ergänzt; `get_or_create_project`
+  nutzt sie intern (Konsistenz-Refactor, analog zu `get_contact_by_name` in
+  `upsert_contact`).
+- **Vorschlag** ([`orchestrator.py`](src/kollege/orchestrator.py)):
+  `_unknown_project_names(result, repo)` ermittelt, welche `task.project`-/
+  `project_updates.project`-Namen noch nicht in der DB existieren;
+  `_result_items`/`format_proposal` markieren sie im Label als
+  `[Projektname — neu]` bzw. `📁 Projekt: Name — neu`. `format_proposal` bekommt
+  dafür ein optionales `repo`-Argument (ohne Repo — z. B. isolierte
+  Formatierungstests — keine Markierung, Rückwärtskompatibilität).
+- **Persistenz**: neue `PersistSummary`-Dataclass (`count` + `new_projects`)
+  ersetzt den nackten `int`-Rückgabewert von `persist_result`. Vor jedem
+  `get_or_create_project`-Aufruf (Projekt-Update, Aufgabe, Aufgaben-Edit mit
+  `new_project`) prüft `persist_result` per `get_project_by_title`, ob das
+  Projekt schon existiert, und sammelt neu angelegte Titel — dedupliziert sich
+  dadurch selbst (nach der ersten Anlage liefert die Prüfung beim nächsten
+  Vorkommen desselben Namens nicht mehr „unbekannt"). Das ist bewusst die
+  **einzige Stelle der Wahrheit**: zwischen Vorschlag und Bestätigung kann ein
+  Projekt anderweitig entstehen (Race) — der Vorschlag markiert nur eine
+  Momentaufnahme, `persist_result` entscheidet verbindlich.
+- **Bestätigung**: `_confirm` hängt bei nicht-leerer `new_projects`-Liste einen
+  Zusatzsatz an die bisherige „✅ N Eintrag/Einträge gespeichert."-Meldung an
+  (z. B. `Neues Projekt angelegt: "Neuer Kundengarten".`), Singular/Plural
+  („Neues Projekt(e) angelegt") je nach Anzahl.
+
+**Bewusst nicht im Scope.** Eigene `📁 Neues Projekt: X`-Zeile als Alternative
+zur Inline-Markierung (Roadmap nannte beide Varianten zur Wahl) — Inline-Marker
+gewählt, weil er 1:1 bei den bestehenden, indexbasierten `_result_items`
+bleibt (keine zusätzliche, nicht-auswählbare Zeile, die die Nummerierung der
+Auswahl verwirren könnte).
+
+**DoD.** ✅
+- ✅ `get_project_by_title` test-driven (fehlend → `None`, vorhanden → Treffer).
+- ✅ `format_proposal`: unbekanntes Projekt (Aufgabe *und* Projekt-Update) wird
+  markiert; bestehendes Projekt nicht; ohne `repo`-Argument keine Markierung.
+- ✅ `persist_result`/`PersistSummary`: `new_projects` für neues Projekt
+  gefüllt, für bestehendes Projekt leer, bei zwei Aufgaben im selben neuen
+  Projekt nur einmal gelistet (Dedup).
+- ✅ Orchestrator-E2E (gemockte `run_extraction`): unbekanntes Projekt → Marker
+  im Vorschlag *und* Namensnennung in der ✅-Bestätigung; bestehendes Projekt →
+  keine Markierung, unveränderte Zählung.
+- ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 369 Tests).

@@ -120,6 +120,18 @@ def test_get_or_create_project_with_contact(repo: Repository) -> None:
     assert proj.contact_id == contact.id
 
 
+def test_get_project_by_title_returns_none_when_missing(repo: Repository) -> None:
+    """Nicht-anlegende Variante (Schritt 8.25) — legt anders als get_or_create_project nichts an."""
+    assert repo.get_project_by_title("Unbekanntes Projekt") is None
+
+
+def test_get_project_by_title_returns_existing(repo: Repository) -> None:
+    created = repo.get_or_create_project("Gartenpflege Weber")
+    found = repo.get_project_by_title("Gartenpflege Weber")
+    assert found is not None
+    assert found.id == created.id
+
+
 def test_update_project(repo: Repository) -> None:
     proj = repo.get_or_create_project("Grünanlage West")
     updated = repo.update_project(

@@ -80,6 +80,7 @@ __all__ = [
     "PendingClarification",
     "PendingDeletion",
     "PendingProposal",
+    "PersistSummary",
     "dedupe_result",
     "format_contacts",
     "format_date_de",
@@ -333,8 +334,28 @@ class PendingDeletion:
 # ---------------------------------------------------------------------------
 
 
-def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
-    """Alle extrahierten Elemente als (Label, Objekt)-Liste (stabile Reihenfolge)."""
+def _unknown_project_names(result: ExtractionResult, repo: Repository) -> frozenset[str]:
+    """Projektnamen aus Aufgaben/Projekt-Updates, die noch nicht in der DB existieren.
+
+    Nur für die Anzeige im Vorschlag (Schritt 8.25) — die Wahrheit entscheidet sich
+    erst beim Persistieren (``persist_result.new_projects``), da zwischen Vorschlag
+    und Bestätigung ein Projekt anderweitig entstehen kann (Race).
+    """
+    names = {t.project for t in result.tasks if t.project}
+    names |= {pu.project for pu in result.project_updates}
+    return frozenset(name for name in names if repo.get_project_by_title(name) is None)
+
+
+def _result_items(
+    result: ExtractionResult, unknown_projects: frozenset[str] = frozenset()
+) -> list[tuple[str, _Item]]:
+    """Alle extrahierten Elemente als (Label, Objekt)-Liste (stabile Reihenfolge).
+
+    ``unknown_projects`` (Schritt 8.25): Projektnamen, die noch nicht in der DB
+    existieren, werden im Label als "— neu" markiert — implizit über
+    ``get_or_create_project`` angelegte Projekte sollen VOR der Bestätigung
+    sichtbar sein (Human-in-the-loop-Lücke, Designprinzip 3).
+    """
     items: list[tuple[str, _Item]] = []
     for c in result.contacts:
         typ = f" ({c.type})" if c.type else ""
@@ -343,11 +364,16 @@ def _result_items(result: ExtractionResult) -> list[tuple[str, _Item]]:
         # due wird IMMER angezeigt — auch "(kein Datum)" —, damit der Nutzer ein
         # fehlendes/falsches Datum schon VOR der Bestätigung erkennt.
         due = f", fällig: {format_date_de(t.due)}" if t.due else ", fällig: (kein Datum)"
-        proj = f" [{t.project}]" if t.project else ""
+        if t.project:
+            marker = " — neu" if t.project in unknown_projects else ""
+            proj = f" [{t.project}{marker}]"
+        else:
+            proj = ""
         items.append((f"📋 Aufgabe: {t.title}{proj}{due}", t))
     for pu in result.project_updates:
         status_str = f" → {pu.status}" if pu.status else ""
-        items.append((f"📁 Projekt: {pu.project}{status_str}", pu))
+        marker = " — neu" if pu.project in unknown_projects else ""
+        items.append((f"📁 Projekt: {pu.project}{marker}{status_str}", pu))
     for comp in result.completed:
         items.append((f"✅ Aufgabe schließen: #{comp.task_id} {comp.task_title}", comp))
     for ed in result.edits:
@@ -452,9 +478,16 @@ _CORRECTION_HINT = (
 )
 
 
-def format_proposal(result: ExtractionResult) -> str:
-    """Bestätigungstext aus ExtractionResult erzeugen."""
-    items = _result_items(result)
+def format_proposal(result: ExtractionResult, repo: Repository | None = None) -> str:
+    """Bestätigungstext aus ExtractionResult erzeugen.
+
+    ``repo`` (optional, Schritt 8.25): wenn angegeben, werden Aufgaben-/Projekt-
+    Update-Referenzen auf noch nicht existierende Projekte im Label markiert
+    ("— neu") — ohne Repo (z. B. in isolierten Formatierungstests) entfällt die
+    Markierung.
+    """
+    unknown_projects = _unknown_project_names(result, repo) if repo is not None else frozenset()
+    items = _result_items(result, unknown_projects)
     lines: list[str] = ["Ich habe folgendes erkannt:\n"]
     if len(items) == 1:
         label, _ = items[0]
@@ -498,17 +531,34 @@ def _format_task_edit_entry(ed: ExtractedTaskEdit) -> str:
     return f"Aufgabe geändert: {ed.task_title} — {_edit_changes(ed)}"
 
 
+@dataclass
+class PersistSummary:
+    """Ergebnis von ``persist_result`` (Schritt 8.25).
+
+    ``count`` ist die bisherige Gesamtzahl persistierter Elemente; ``new_projects``
+    sind die Titel der Projekte, die dabei implizit **neu** angelegt wurden (über
+    ``get_or_create_project``) — damit die ✅-Bestätigung sie explizit nennen kann
+    (Human-in-the-loop-Sichtbarkeit für einen sonst stillen Nebeneffekt,
+    Designprinzip 3). Die Wahrheit entscheidet sich hier, beim Persistieren, nicht
+    schon im Vorschlag (``_unknown_project_names``) — zwischen Vorschlag und
+    Bestätigung kann das Projekt anderweitig entstehen (Race).
+    """
+
+    count: int
+    new_projects: list[str] = field(default_factory=list)
+
+
 def persist_result(
     result: ExtractionResult,
     indices: list[int] | None,
     repo: Repository,
     log_dir: Path,
-) -> int:
+) -> PersistSummary:
     """ExtractionResult in das echte Repository schreiben.
 
     indices: ``None`` → alle Einträge übernehmen; sonst 0-basierte Indizes
              der vom Nutzer ausgewählten Elemente.
-    Gibt Anzahl persistierter Elemente zurück.
+    Gibt eine ``PersistSummary`` zurück (Anzahl + neu angelegte Projekte).
     """
     items = _result_items(result)
     selected: set[int] = set(range(len(items))) if indices is None else set(indices)
@@ -534,6 +584,7 @@ def persist_result(
             edits_to_save.append(obj)
 
     count = 0
+    new_projects: list[str] = []
 
     # 1. Kontakte zuerst — Tasks/Projekte benötigen ggf. contact_id
     for ec in contacts_to_save:
@@ -542,6 +593,8 @@ def persist_result(
 
     # 2. Projektaktualisierungen
     for pu in updates_to_save:
+        if repo.get_project_by_title(pu.project) is None:
+            new_projects.append(pu.project)
         project = repo.get_or_create_project(pu.project)
         if pu.status is not None:
             project.status = pu.status
@@ -565,6 +618,8 @@ def persist_result(
                 contact_id = c.id
         project_id: int | None = None
         if et.project:
+            if repo.get_project_by_title(et.project) is None:
+                new_projects.append(et.project)
             p = repo.get_or_create_project(et.project, contact_id=contact_id)
             had_log = p.markdown_log_path is not None
             log = open_project_log(p, log_dir)
@@ -601,6 +656,8 @@ def persist_result(
     for ed in edits_to_save:
         new_project_id: int | None = None
         if ed.new_project:
+            if repo.get_project_by_title(ed.new_project) is None:
+                new_projects.append(ed.new_project)
             p = repo.get_or_create_project(ed.new_project)
             if p.markdown_log_path is None:
                 open_project_log(p, log_dir)
@@ -622,7 +679,7 @@ def persist_result(
                 log.append_entry(_format_task_edit_entry(ed), source="Sprachnotiz")
         count += 1
 
-    return count
+    return PersistSummary(count=count, new_projects=new_projects)
 
 
 # ---------------------------------------------------------------------------
@@ -811,7 +868,7 @@ class Orchestrator:
             transcript=transcript,
             result=result,
         )
-        proposal_text = format_proposal(result)
+        proposal_text = format_proposal(result, self._repo)
         self._trace.write("proposal_sent", rid, {"text": proposal_text})
         proposal.sent_timestamp = self._channel.send(msg.sender, proposal_text)
         self._pending[msg.sender] = proposal
@@ -1151,16 +1208,28 @@ class Orchestrator:
 
     def _confirm(self, sender: str, indices: list[int] | None, run_id: str) -> None:
         proposal = self._pending.pop(sender)
-        count = persist_result(proposal.result, indices, self._repo, self._log_dir)
+        summary = persist_result(proposal.result, indices, self._repo, self._log_dir)
         labels = [
             label
             for i, (label, _) in enumerate(_result_items(proposal.result))
             if indices is None or i in indices
         ]
-        logger.info("Persistiert: %d Eintrag/Einträge für %s", count, sender)
+        logger.info("Persistiert: %d Eintrag/Einträge für %s", summary.count, sender)
         self._trace.write("confirmed", run_id, {"indices": indices})
-        self._trace.write("persisted", run_id, {"count": count, "labels": labels})
-        self._channel.send(sender, f"✅ {count} Eintrag/Einträge gespeichert.")
+        self._trace.write(
+            "persisted",
+            run_id,
+            {"count": summary.count, "labels": labels, "neue_projekte": summary.new_projects},
+        )
+        message = f"✅ {summary.count} Eintrag/Einträge gespeichert."
+        if summary.new_projects:
+            # Neu angelegte Projekte explizit nennen — sonst stiller Nebeneffekt von
+            # get_or_create_project, den die Nutzerin nie bestätigt hat (Schritt 8.25,
+            # Designprinzip 3).
+            names = ", ".join(f'"{name}"' for name in summary.new_projects)
+            suffix = "e" if len(summary.new_projects) > 1 else ""
+            message += f" Neues Projekt{suffix} angelegt: {names}."
+        self._channel.send(sender, message)
 
     def _reject(self, sender: str, run_id: str) -> None:
         self._pending.pop(sender)
@@ -1267,7 +1336,7 @@ class Orchestrator:
         proposal = PendingProposal(
             sender=sender, transcript=pending.transcript, result=result, history=new_history
         )
-        proposal_text = format_proposal(result)
+        proposal_text = format_proposal(result, self._repo)
         self._trace.write("proposal_sent", run_id, {"text": proposal_text})
         proposal.sent_timestamp = self._channel.send(sender, proposal_text)
         self._pending[sender] = proposal
@@ -1359,7 +1428,7 @@ class Orchestrator:
             result=revised,
             history=[*proposal.history, ("Korrektur", correction_text)],
         )
-        proposal_text = format_proposal(revised)
+        proposal_text = format_proposal(revised, self._repo)
         self._trace.write("proposal_sent", run_id, {"text": proposal_text})
         new_proposal.sent_timestamp = self._channel.send(sender, proposal_text)
         self._pending[sender] = new_proposal

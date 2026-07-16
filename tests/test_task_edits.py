@@ -186,9 +186,9 @@ def test_persist_result_edit_changes_title(log_dir: Path) -> None:
         ]
     )
 
-    count = persist_result(result, None, repo, log_dir)
+    summary = persist_result(result, None, repo, log_dir)
 
-    assert count == 1
+    assert summary.count == 1
     open_items = repo.query_open_items()
     assert len(open_items) == 1
     assert open_items[0].title == "Bad Aibling begehen"
@@ -201,9 +201,9 @@ def test_persist_result_edit_unknown_task_id_is_skipped(log_dir: Path) -> None:
         edits=[ExtractedTaskEdit(task_id=999, task_title="Nicht da", new_title="egal")]
     )
 
-    count = persist_result(result, None, repo, log_dir)
+    summary = persist_result(result, None, repo, log_dir)
 
-    assert count == 0
+    assert summary.count == 0
 
 
 def test_persist_result_edit_appends_correction_to_project_log(log_dir: Path) -> None:
