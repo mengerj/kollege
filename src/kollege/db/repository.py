@@ -106,6 +106,13 @@ CREATE TABLE IF NOT EXISTS tasks (
 )
 """
 
+_DDL_REMINDER_STATE = """
+CREATE TABLE IF NOT EXISTS reminder_state (
+    key        TEXT PRIMARY KEY,
+    last_sent  TEXT NOT NULL
+)
+"""
+
 
 def _now() -> str:
     return datetime.now(tz=UTC).isoformat()
@@ -127,6 +134,7 @@ class Repository:
         cur.execute(_DDL_CONTACTS)
         cur.execute(_DDL_PROJECTS)
         cur.execute(_DDL_TASKS)
+        cur.execute(_DDL_REMINDER_STATE)
         self._migrate_ort_columns(cur)
         self._conn.commit()
 
@@ -649,3 +657,29 @@ class Repository:
             "SELECT * FROM projects WHERE waiting_on = ?", (str(waiting_on),)
         ).fetchall()
         return [self._row_to_project(r) for r in rows]
+
+    # ------------------------------------------------------------------ #
+    # Reminder-Zeitplan (Schritt 8.27)                                     #
+    # ------------------------------------------------------------------ #
+
+    @_synchronized
+    def get_reminder_last_sent(self, key: str) -> datetime | None:
+        """Zuletzt versendeter Zeitpunkt einer Erinnerungs-Regel (``ReminderRule.key()``).
+
+        ``None``, wenn diese Regel noch nie ausgelöst hat — Neustart-sicher, damit
+        der Bot nach einem Absturz/Neustart nicht doppelt sendet.
+        """
+        row = self._conn.execute(
+            "SELECT last_sent FROM reminder_state WHERE key = ?", (key,)
+        ).fetchone()
+        return datetime.fromisoformat(row["last_sent"]) if row is not None else None
+
+    @_synchronized
+    def set_reminder_last_sent(self, key: str, when: datetime) -> None:
+        """Zeitpunkt der letzten Versendung einer Regel vermerken (Upsert)."""
+        self._conn.execute(
+            "INSERT INTO reminder_state (key, last_sent) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET last_sent = excluded.last_sent",
+            (key, when.isoformat()),
+        )
+        self._conn.commit()

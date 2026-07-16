@@ -12,33 +12,31 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan** (siehe
-Details/DoD weiter unten).
+**Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen)**
+(siehe Details/DoD weiter unten) — **automatisch anschließbar**, keine
+Live-Nutzerin nötig (Messung über den 8.11-Benchmark).
 
-**Kontext: Testphase mit der Nutzerin steht an.** Der Bot wird als Linked Device
-an *ihrem* Signal-Konto verknüpft (QR-Scan), Host bleibt vorerst der Laptop,
-Modell bleibt `mistral-medium-3.1` via OpenRouter. Die Nutzerin willigt in die
-Datenverarbeitung schriftlich ein (Dokument liegt in `docs/privat/`,
-gitignored). Die drei Testphasen-Features in dieser Reihenfolge: ~~8.25~~
-(neue Projekte sichtbar, erledigt) → ~~8.26~~ (Örtlichkeit als vierte Entität,
-erledigt) → **8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
+**Testphasen-Vorbereitung abgeschlossen.** Alle drei vorbereitenden Features
+sind erledigt: ~~8.25~~ (neue Projekte sichtbar) → ~~8.26~~ (Örtlichkeit als
+vierte Entität) → ~~8.27~~ (proaktive Erinnerungen mit konfigurierbarem
+Zeitplan). Die eigentliche Live-Testphase mit der Nutzerin (Bot als Linked
+Device an ihrem Signal-Konto, QR-Scan, Host vorerst der Laptop, Modell
+`mistral-medium-3.1` via OpenRouter, schriftliche Einwilligung in
+`docs/privat/`) beginnt, sobald sie Zeit hat — dafür ist **Schritt 8.5**
+(restliche Live-Edge-Cases) mit der Observability aus 8.21 vorgesehen, inkl.
+Validierung von 8.18/8.19/8.20/8.22 und jetzt auch 8.26/8.27 live.
 
-**Schritt 8.23** (Token-Sparen) bleibt offen und ist weiterhin jederzeit
-**automatisch** anschließbar (keine Live-Nutzerin nötig, Messung über den
-8.11-Benchmark) — er blockiert die Testphase nicht; seit 8.26 wächst der
-Prompt-Kontext (neuer `[BEKANNTE NAMEN]`-Block für Orte) bereits, was 8.23
-relevanter macht. Sobald live getestet wird: **Schritt 8.5** (restliche
-Live-Edge-Cases) mit der neuen Observability (8.21), inkl. Validierung von
-8.18/8.19/8.20 und dem 8.22-Lösch-Flow live. Danach: Stufe B für **Kontakte**
-(Umbenennung + Merge).
+**Bis dahin: Schritt 8.23** — seit 8.26 wächst der Prompt-Kontext (neuer
+`[BEKANNTE NAMEN]`-Block für Orte), was ihn zunehmend relevanter macht. Danach:
+Stufe B für **Kontakte** (Umbenennung + Merge).
 
 > **DSGVO-konforme EU-LLM-Anbindung** ist nach **Schritt 9.1** verschoben (Phase 2)
 > — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb.
 
-*Zuletzt erledigt: 8.26 (vierte Entität „Örtlichkeit" — Name/Adresse/
-Flurnummer, verknüpfbar mit Kontakten/Projekten, automatische Session). Was &
-warum steht im [PROJECT_LOG.md](PROJECT_LOG.md); die Detail-DoD im
-[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
+*Zuletzt erledigt: 8.27 (proaktive Erinnerungen — Ping/Aufgabenliste nach
+konfigurierbarem Wochentag/Uhrzeit-Zeitplan, `data/reminders.toml`,
+automatische Session). Was & warum steht im [PROJECT_LOG.md](PROJECT_LOG.md);
+die Detail-DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -80,10 +78,10 @@ warum steht im [PROJECT_LOG.md](PROJECT_LOG.md); die Detail-DoD im
 | 8.20 | Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix) | 1.5 | ✅ erledigt |
 | 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
 | 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
-| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ⬜ offen (automatisch anschließbar) |
+| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ▶ nächster Schritt |
 | 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ✅ erledigt |
 | 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ✅ erledigt |
-| 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ▶ nächster Schritt |
+| 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ✅ erledigt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 9.1 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 2 | 🅿️ verschoben (war 8.12) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -110,9 +108,9 @@ bestätigte Aufgaben/Kontakte zurück. Läuft komplett lokal auf dem Air.*
 
 ## Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns *(vor Phase 2)*
 
-> **Erledigte Schritte dieser Phase** (8.6, 8.7, 8.9–8.11, 8.13–8.22) stehen
-> mit voller Begründung/DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md); hier nur
-> noch die **offenen** Schritte.
+> **Erledigte Schritte dieser Phase** (8.6, 8.7, 8.9–8.11, 8.13–8.22, 8.25–8.27)
+> stehen mit voller Begründung/DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md);
+> hier nur noch die **offenen** Schritte.
 
 *Ziel der Phase: Der bestehende Kern (Sprachnotiz → Vorschlag → Bestätigung → DB)
 soll sich im Alltag **flüssig, schnell genug und vertrauenswürdig** anfühlen.
@@ -193,48 +191,6 @@ Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
 Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
 doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
 Regression; CI-Kette grün.
-
-### Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan ⬜
-
-**Motiv.** Wert des Assistenten ist **rechtzeitiges Erinnern** (siehe „Grenzen
-& bewusste Auslassungen"). In der Testphase soll der Bot von sich aus melden —
-Vorgriff auf **Schritt 11** (der dann auf dieser Mechanik aufsetzt statt sie
-neu zu bauen). Zwei Nachrichtentypen:
-1. **Nachfrage-Ping:** kurze Erinnerung im Stil „Gibt es Neues? Sind Aufgaben
-   dazugekommen oder erledigt worden?" — lädt zur Sprachnotiz ein (Prinzip 1:
-   passive Erfassung braucht Anlässe).
-2. **Offene-Aufgaben-Liste:** schön formatierte Liste aller offenen Aufgaben
-   mit Bezug (Projekt, Kontakt, Örtlichkeit aus 8.26) und Fälligkeit, sinnvoll
-   sortiert (überfällig zuerst).
-
-**Zeitplan frei konfigurierbar.** Beispiel-Anforderung: Mo+Fr morgens *und*
-abends, Di–Do nur nachmittags — beliebig änderbar, ohne Code anzufassen.
-Vorschlag: Konfig-Datei (z. B. `data/reminders.toml`) mit Einträgen aus
-`typ` (ping | liste), Wochentagen und Uhrzeiten; Cron-Syntax nur, falls die
-einfache Form nicht reicht.
-
-**Ansatz.**
-- **Scheduler:** Entscheidung im Schritt — `APScheduler` (für Schritt 11
-  ohnehin geplant) oder schlanker eigener Ticker in `run_forever`
-  (Zeit-Check pro Poll-Schleife). Kriterium: Testbarkeit (Zeit mocken) und
-  keine Doppel-Sendung bei Neustart.
-- **Laptop-Realität:** Host schläft ggf. — verpasste Zeitpunkte bewusst
-  einfach behandeln (im Schritt festzurren: gar nicht nachholen oder max. den
-  jüngsten verpassten nachholen, nie stapeln).
-- **Versand** über den bestehenden Channel an `signal_number` (Note-to-Self,
-  wie alle Bot-Nachrichten). Erinnerung darf offene Pending-Zustände
-  (Vorschlag/Rückfrage/Löschung) **nicht** verwerfen oder stören.
-- Formatierung der Liste aus den bestehenden Query-Funktionen (8.15) ableiten.
-
-**Bewusst nicht im Scope.** Konfiguration per Chat-Command (Datei reicht in der
-Testphase); IMAP-Polling (Schritt 11); „intelligente" Auswahl, *welche* Aufgaben
-erinnert werden — es gehen schlicht alle offenen in die Liste.
-
-**DoD.** Zeitplan-Konfig-Datei mit Wochentag/Uhrzeit-Regeln je Nachrichtentyp,
-dokumentiert mit Beispiel; deterministische Tests für die Auslöse-Logik
-(gemockte Zeit, keine Doppel-Sendung, Neustart-sicher); Liste zeigt
-Projekt/Kontakt/Ort-Bezug + Fälligkeit; läuft im Dauerbetrieb
-(`scripts/run_signal.py`); CI-Kette grün.
 
 ---
 

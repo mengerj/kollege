@@ -30,6 +30,7 @@ from kollege.agent import pre_warm_model
 from kollege.channels.signal_channel import SignalChannel
 from kollege.config import load_settings
 from kollege.db import open_repository
+from kollege.reminders import load_reminder_rules
 from kollege.transcription.faster_whisper import FasterWhisperTranscriber
 
 
@@ -85,6 +86,12 @@ def main() -> None:
     print(f"  LLM:         {settings.llm_provider}/{settings.llm_model}")
     print(f"  DB:          {settings.db_path}")
     print(f"  Logs:        {settings.markdown_dir}")
+    reminders_path = Path(settings.reminders_config_path)
+    if reminders_path.exists():
+        n_rules = len(load_reminder_rules(reminders_path))
+        print(f"  Erinnerungen: AN ({reminders_path}, {n_rules} Regel(n))")
+    else:
+        print(f"  Erinnerungen: AUS (keine Datei unter {reminders_path})")
     print("=" * 60)
 
     # --- Vorab-Prüfungen mit klaren Fehlermeldungen ---------------------------

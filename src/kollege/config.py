@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     trace_enabled: bool = Field(default=False, validation_alias="KOLLEGE_TRACE")
     trace_dir: str = "data/traces"
 
+    # Proaktive Erinnerungen (Schritt 8.27) — Zeitplan frei konfigurierbar ohne
+    # Code anzufassen, siehe docs/reminders.example.toml. Fehlt die Datei, werden
+    # schlicht keine Erinnerungen versendet.
+    reminders_config_path: str = "data/reminders.toml"
+
 
 def load_settings() -> Settings:
     """Settings aus Umgebung/`.env` laden. Eigene Funktion erleichtert Mocking."""
