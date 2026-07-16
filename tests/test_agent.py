@@ -227,6 +227,54 @@ def test_update_project_status_tool_updates_db() -> None:
     assert projects[0].next_action == "Kostenvoranschlag vorlegen"
 
 
+def test_link_ort_tool_writes_to_db() -> None:
+    """Tool link_ort legt Örtlichkeit in der DB an (Schritt 8.26)."""
+    repo = _repo()
+    model = _make_tool_model(
+        "link_ort",
+        {"name": "Flurstück 12", "adresse": "Musterweg 3", "flurnummer": "12/3"},
+    )
+    agent.run_sync("...", model=model, deps=repo)
+
+    ort = repo.get_ort_by_name("Flurstück 12")
+    assert ort is not None
+    assert ort.adresse == "Musterweg 3"
+    assert ort.flurnummer == "12/3"
+
+
+def test_link_ort_tool_links_existing_contact() -> None:
+    """link_ort verknüpft mit einem bereits bestehenden Kontakt."""
+    repo = _repo()
+    from kollege.models import ExtractedContact
+
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+
+    model = _make_tool_model(
+        "link_ort",
+        {"name": "Flurstück 12", "contact_name": "Familie Müller"},
+    )
+    agent.run_sync("...", model=model, deps=repo)
+
+    updated_contact = repo.get_contact_by_id(contact.id)
+    assert updated_contact is not None
+    assert updated_contact.ort_id is not None
+
+
+def test_link_ort_tool_resolves_project() -> None:
+    """link_ort legt Projekt automatisch an, wenn es noch nicht existiert (wie create_task)."""
+    repo = _repo()
+    model = _make_tool_model(
+        "link_ort",
+        {"name": "Flurstück 12", "project_title": "Garten Schneider"},
+    )
+    agent.run_sync("...", model=model, deps=repo)
+
+    project = repo.get_project_by_title("Garten Schneider")
+    assert project is not None
+    assert project.ort_id is not None
+
+
 def test_query_open_items_tool_returns_string() -> None:
     """Tool query_open_items gibt lesbare Zusammenfassung zurück (kein Crash)."""
     repo = _repo()
@@ -488,6 +536,42 @@ def test_run_revision_prompt_includes_completed_and_edits() -> None:
     assert "Titel → «Plan Aibling»" in prompt
     # Die Übernahme-Anweisung steht im Prompt.
     assert "unverändert" in prompt
+
+
+def test_run_revision_prompt_includes_locations() -> None:
+    """Örtlichkeiten des bisherigen Vorschlags müssen im Korrektur-Prompt sichtbar
+    sein — sonst gilt dieselbe Verlust-Gefahr wie bei Erledigungen/Änderungen (8.20)."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_revision
+    from kollege.models import ExtractedOrt
+
+    captured: dict[str, str] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    current = ExtractionResult(
+        locations=[
+            ExtractedOrt(
+                name="Flurstück 12", adresse="Musterweg 3", flurnummer="12/3", project="Stadtpark"
+            )
+        ]
+    )
+
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_revision(
+            original_transcript="Notiz zum Flurstück.",
+            current_result=current,
+            correction="Die Adresse ist Musterweg 5.",
+            settings=Settings(),
+        )
+
+    prompt = captured["prompt"]
+    assert "Örtlichkeit: Flurstück 12" in prompt
+    assert "Musterweg 3" in prompt
+    assert "Projekt: Stadtpark" in prompt
 
 
 def test_run_revision_prompt_completed_survive_reflecting_model() -> None:

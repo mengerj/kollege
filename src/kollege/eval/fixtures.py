@@ -45,6 +45,11 @@ class ExtractionExpectation(BaseModel):
     min_completed: int = 0
     must_contain_task_ids: list[int] = Field(default_factory=list)
 
+    # Örtlichkeiten (Schritt 8.26).
+    min_locations: int = 0
+    max_locations: int | None = None
+    location_names: list[str] = Field(default_factory=list)
+
     forbidden_keywords: list[str] = Field(default_factory=list)
     must_not_be_empty: bool = False
 

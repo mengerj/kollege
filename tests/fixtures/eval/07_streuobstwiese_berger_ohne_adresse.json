@@ -1,0 +1,12 @@
+{
+  "id": "streuobstwiese_berger_ohne_adresse",
+  "description": "Örtlichkeit ohne Adresse/Flurnummer, nur mit Kontaktverknüpfung (Schritt 8.26)",
+  "transcript": "Bei Familie Berger gibt es noch die Streuobstwiese, die nennen wir einfach Streuobstwiese Berger.",
+  "expected": {
+    "min_contacts": 1,
+    "contact_names": ["Berger"],
+    "min_locations": 1,
+    "location_names": ["Streuobstwiese"],
+    "must_not_be_empty": true
+  }
+}

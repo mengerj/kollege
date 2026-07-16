@@ -75,6 +75,14 @@ def score_result(result: ExtractionResult, expected: ExtractionExpectation) -> F
         if any(comp.task_id == task_id for comp in result.completed):
             hits += 1
 
+    total += 1
+    if len(result.locations) >= expected.min_locations:
+        hits += 1
+    for loc_kw in expected.location_names:
+        total += 1
+        if any(loc_kw.lower() in loc.name.lower() for loc in result.locations):
+            hits += 1
+
     over_extraction = (
         (expected.max_contacts is not None and len(result.contacts) > expected.max_contacts)
         or (expected.max_tasks is not None and len(result.tasks) > expected.max_tasks)
@@ -82,12 +90,14 @@ def score_result(result: ExtractionResult, expected: ExtractionExpectation) -> F
             expected.max_project_updates is not None
             and len(result.project_updates) > expected.max_project_updates
         )
+        or (expected.max_locations is not None and len(result.locations) > expected.max_locations)
     )
 
     haystack = " ".join(
         [c.name for c in result.contacts]
         + [t.title for t in result.tasks]
         + [pu.project for pu in result.project_updates]
+        + [loc.name for loc in result.locations]
         + ([result.clarification] if result.clarification else [])
     ).lower()
     forbidden_hit = any(kw.lower() in haystack for kw in expected.forbidden_keywords)

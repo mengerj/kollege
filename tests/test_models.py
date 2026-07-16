@@ -10,8 +10,10 @@ from pydantic import ValidationError
 from kollege.models import (
     Contact,
     ContactType,
+    ExtractedOrt,
     ExtractedTask,
     ExtractionResult,
+    Ort,
     Project,
     ProjectStatus,
     Task,
@@ -80,3 +82,31 @@ def test_extraction_result_can_request_clarification() -> None:
     r = ExtractionResult(clarification="Meinst du Familie Müller oder Gemeinde Müller?")
     assert r.is_empty() is True
     assert r.clarification is not None
+
+
+def test_ort_minimal_requires_only_name() -> None:
+    o = Ort(name="Flurstück 12")
+    assert o.id is None
+    assert o.adresse is None
+    assert o.flurnummer is None
+
+
+def test_ort_with_adresse_and_flurnummer() -> None:
+    o = Ort(name="Garten Hinterberger", adresse="Seestraße 7", flurnummer="118")
+    assert o.adresse == "Seestraße 7"
+    assert o.flurnummer == "118"
+
+
+def test_extracted_ort_optional_links() -> None:
+    loc = ExtractedOrt(name="Streuobstwiese Berger", contact="Familie Berger")
+    assert loc.contact == "Familie Berger"
+    assert loc.project is None
+
+
+def test_contact_and_project_default_ort_id_none() -> None:
+    assert Contact(name="Familie Müller").ort_id is None
+    assert Project(title="Garten Müller").ort_id is None
+
+
+def test_extraction_result_locations_counts_toward_is_empty() -> None:
+    assert ExtractionResult(locations=[ExtractedOrt(name="Flurstück 12")]).is_empty() is False

@@ -12,7 +12,7 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.26 — Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer)** (siehe
+**Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan** (siehe
 Details/DoD weiter unten).
 
 **Kontext: Testphase mit der Nutzerin steht an.** Der Bot wird als Linked Device
@@ -20,14 +20,14 @@ an *ihrem* Signal-Konto verknüpft (QR-Scan), Host bleibt vorerst der Laptop,
 Modell bleibt `mistral-medium-3.1` via OpenRouter. Die Nutzerin willigt in die
 Datenverarbeitung schriftlich ein (Dokument liegt in `docs/privat/`,
 gitignored). Die drei Testphasen-Features in dieser Reihenfolge: ~~8.25~~
-(neue Projekte sichtbar, erledigt) → **8.26** (Örtlichkeit als vierte Entität)
-→ **8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
+(neue Projekte sichtbar, erledigt) → ~~8.26~~ (Örtlichkeit als vierte Entität,
+erledigt) → **8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
 
 **Schritt 8.23** (Token-Sparen) bleibt offen und ist weiterhin jederzeit
 **automatisch** anschließbar (keine Live-Nutzerin nötig, Messung über den
-8.11-Benchmark) — er blockiert die Testphase nicht; nach 8.26 wächst der
-Prompt-Kontext (neuer `[BEKANNTE NAMEN]`-Block für Orte) sogar weiter, was
-8.23 relevanter macht. Sobald live getestet wird: **Schritt 8.5** (restliche
+8.11-Benchmark) — er blockiert die Testphase nicht; seit 8.26 wächst der
+Prompt-Kontext (neuer `[BEKANNTE NAMEN]`-Block für Orte) bereits, was 8.23
+relevanter macht. Sobald live getestet wird: **Schritt 8.5** (restliche
 Live-Edge-Cases) mit der neuen Observability (8.21), inkl. Validierung von
 8.18/8.19/8.20 und dem 8.22-Lösch-Flow live. Danach: Stufe B für **Kontakte**
 (Umbenennung + Merge).
@@ -35,9 +35,10 @@ Live-Edge-Cases) mit der neuen Observability (8.21), inkl. Validierung von
 > **DSGVO-konforme EU-LLM-Anbindung** ist nach **Schritt 9.1** verschoben (Phase 2)
 > — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb.
 
-*Zuletzt erledigt: 8.25 (neue Projekte in Vorschlag & Bestätigung sichtbar,
-automatische Session). Was & warum steht im [PROJECT_LOG.md](PROJECT_LOG.md);
-die Detail-DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
+*Zuletzt erledigt: 8.26 (vierte Entität „Örtlichkeit" — Name/Adresse/
+Flurnummer, verknüpfbar mit Kontakten/Projekten, automatische Session). Was &
+warum steht im [PROJECT_LOG.md](PROJECT_LOG.md); die Detail-DoD im
+[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -81,8 +82,8 @@ die Detail-DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 | 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
 | 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ⬜ offen (automatisch anschließbar) |
 | 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ✅ erledigt |
-| 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ▶ nächster Schritt |
-| 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ⬜ offen |
+| 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ✅ erledigt |
+| 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ▶ nächster Schritt |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 9.1 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 2 | 🅿️ verschoben (war 8.12) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -192,42 +193,6 @@ Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
 Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
 doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
 Regression; CI-Kette grün.
-
-### Schritt 8.26 — Vierte Entität: „Örtlichkeit" (Name/Adresse/Flurnummer) ⬜
-
-**Motiv.** Landschaftsarchitektur arbeitet ortsbezogen (Grundstücke,
-Flurstücke, Baustellen). Neben Kontakt/Projekt/Aufgabe soll eine vierte
-Entität **Örtlichkeit** erfasst werden: `name` (Pflicht), `adresse` und
-`flurnummer` (optional), verknüpfbar mit **Kontakten und Projekten**.
-
-**Ansatz.**
-- **Datenmodell** ([`models.py`](src/kollege/models.py)): `Ort` (DB-Modell) +
-  `ExtractedOrt` (LLM-Schema) + Feld in `ExtractionResult`. Verknüpfung —
-  Entscheidung im Schritt, Startpunkt einfachst tragfähig: `Project.ort_id`
-  (ein Projekt spielt an höchstens einem Ort) und `Contact`↔`Ort` analog;
-  n:m-Tabelle nur, wenn der Bedarf real wird. Deutscher Domänenbegriff
-  (`ort`/`oertlichkeit`) wie üblich beibehalten.
-- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)):
-  CRUD + `get_or_create_ort` + Namensabgleich; Lösch-Referenzregel wie bei
-  Kontakten (Zuordnung lösen → `NULL`, **kein** Cascade). Bestehende DB:
-  Schema-Migration bedenken (neue Tabelle + Spalten auf Bestand).
-- **Extraktion** ([`agent/__init__.py`](src/kollege/agent/__init__.py)):
-  System-Prompt um Örtlichkeiten erweitern; `[BEKANNTE NAMEN]`-Kontext um Orte
-  ergänzen (8.7-Mechanik). **Achtung Token-Budget:** neuer Kontextblock
-  vergrößert jeden Prompt — im Blick behalten, das ist das 8.23-Motiv.
-- **Oberfläche:** 📍-Zeile in [`_result_items`](src/kollege/orchestrator.py)
-  (inkl. Neu-Markierung aus 8.25), `/orte`-Query-Command,
-  `/loeschen ort <id>` mit Bestätigung, `/hilfe` aktualisieren.
-- **Qualität:** Eval-Fixtures (8.10) um Ort-Fälle ergänzen (mit/ohne Adresse,
-  Flurnummer, Verknüpfung zu Projekt/Kontakt); Benchmark-Kompatibilität prüfen.
-
-**Bewusst nicht im Scope.** Geokodierung/Karten; Stufe-B-Bearbeitung von Orten
-(erst wie bei Kontakten Bedarf abwarten); n:m-Verknüpfungen, falls FK reicht.
-
-**DoD.** E2E: Sprachnotiz mit Ort (+ Adresse/Flurnummer) → Vorschlag →
-Bestätigung → DB; Ort↔Projekt und Ort↔Kontakt-Verknüpfung wird extrahiert und
-ist via `/orte` abfragbar; Löschung mit Bestätigung funktioniert; bestehende DB
-läuft nach Migration weiter; Eval-Fixtures ergänzt; CI-Kette grün.
 
 ### Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan ⬜
 

@@ -40,7 +40,7 @@ def test_schema_creates_tables(repo: Repository) -> None:
         r[0]
         for r in repo._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    assert {"contacts", "projects", "tasks"}.issubset(tables)
+    assert {"contacts", "projects", "tasks", "orte"}.issubset(tables)
 
 
 # --------------------------------------------------------------------------- #
@@ -443,17 +443,177 @@ def test_reset_all_clears_everything(repo: Repository) -> None:
     contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
     repo.get_or_create_project("Kräutergarten", contact_id=contact.id)
     repo.create_task(Task(title="Beete anlegen"))
+    repo.get_or_create_ort("Flurstück 12")
 
     repo.reset_all()
 
     assert repo.get_all_contacts() == []
     assert repo.get_all_projects() == []
     assert repo.get_all_tasks() == []
+    assert repo.get_all_orte() == []
 
 
 def test_reset_all_on_empty_repo_does_not_raise(repo: Repository) -> None:
     repo.reset_all()
     assert repo.get_all_tasks() == []
+
+
+# --------------------------------------------------------------------------- #
+# Örtlichkeiten (Schritt 8.26)                                                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_get_or_create_ort_creates_new(repo: Repository) -> None:
+    ort = repo.get_or_create_ort("Flurstück 12", adresse="Musterweg 3", flurnummer="12/3")
+    assert ort.id is not None
+    assert ort.name == "Flurstück 12"
+    assert ort.adresse == "Musterweg 3"
+    assert ort.flurnummer == "12/3"
+
+
+def test_get_or_create_ort_dedup_same_name_returns_existing(repo: Repository) -> None:
+    first = repo.get_or_create_ort("Flurstück 12")
+    second = repo.get_or_create_ort("Flurstück 12")
+    assert first.id == second.id
+
+
+def test_get_or_create_ort_updates_adresse_when_provided(repo: Repository) -> None:
+    repo.get_or_create_ort("Flurstück 12")
+    updated = repo.get_or_create_ort("Flurstück 12", adresse="Neue Adresse 1")
+    assert updated.adresse == "Neue Adresse 1"
+
+
+def test_get_or_create_ort_preserves_existing_field_when_not_provided(repo: Repository) -> None:
+    repo.get_or_create_ort("Flurstück 12", adresse="Musterweg 3")
+    again = repo.get_or_create_ort("Flurstück 12")
+    assert again.adresse == "Musterweg 3"
+
+
+def test_get_ort_by_name_not_found(repo: Repository) -> None:
+    assert repo.get_ort_by_name("Niemandsland") is None
+
+
+def test_link_contact_ort_sets_ort_id(repo: Repository) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    ort = repo.get_or_create_ort("Flurstück 12")
+    assert contact.id is not None
+    assert ort.id is not None
+
+    updated = repo.link_contact_ort(contact.id, ort.id)
+
+    assert updated.ort_id == ort.id
+    assert repo.get_contact_by_id(contact.id).ort_id == ort.id  # type: ignore[union-attr]
+
+
+def test_link_project_ort_sets_ort_id(repo: Repository) -> None:
+    project = repo.get_or_create_project("Stadtpark")
+    ort = repo.get_or_create_ort("Flurstück 12")
+    assert project.id is not None
+    assert ort.id is not None
+
+    updated = repo.link_project_ort(project.id, ort.id)
+
+    assert updated.ort_id == ort.id
+    assert repo.get_project_by_id(project.id).ort_id == ort.id  # type: ignore[union-attr]
+
+
+def test_list_orte_sorted_alphabetically(repo: Repository) -> None:
+    repo.get_or_create_ort("Zufahrt Nord")
+    repo.get_or_create_ort("Am Bach")
+    repo.get_or_create_ort("Mühlenweg")
+
+    names = [o.name for o in repo.list_orte()]
+
+    assert names == ["Am Bach", "Mühlenweg", "Zufahrt Nord"]
+
+
+def test_get_all_orte_returns_all(repo: Repository) -> None:
+    repo.get_or_create_ort("Flurstück 12")
+    repo.get_or_create_ort("Flurstück 13")
+    assert len(repo.get_all_orte()) == 2
+
+
+def test_delete_ort_removes_it(repo: Repository) -> None:
+    ort = repo.get_or_create_ort("Flurstück 12")
+    assert ort.id is not None
+
+    repo.delete_ort(ort.id)
+
+    assert repo.get_ort_by_id(ort.id) is None
+
+
+def test_delete_ort_unknown_id_raises(repo: Repository) -> None:
+    with pytest.raises(ValueError, match="nicht gefunden"):
+        repo.delete_ort(999)
+
+
+def test_delete_ort_unlinks_but_keeps_contact_and_project(repo: Repository) -> None:
+    """Referentielle Regel wie bei Kontakten: Löschen löst die Zuordnung, ohne
+    den Kontakt/das Projekt selbst mitzulöschen."""
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    project = repo.get_or_create_project("Stadtpark")
+    ort = repo.get_or_create_ort("Flurstück 12")
+    assert contact.id is not None
+    assert project.id is not None
+    assert ort.id is not None
+    repo.link_contact_ort(contact.id, ort.id)
+    repo.link_project_ort(project.id, ort.id)
+
+    repo.delete_ort(ort.id)
+
+    reloaded_contact = repo.get_contact_by_id(contact.id)
+    reloaded_project = repo._get_project_by_id(project.id)
+    assert reloaded_contact is not None
+    assert reloaded_contact.ort_id is None
+    assert reloaded_project is not None
+    assert reloaded_project.ort_id is None
+
+
+def test_migration_adds_ort_id_to_existing_contacts_and_projects_tables() -> None:
+    """Bestehende DB ohne ``ort_id`` (Zeit vor Schritt 8.26) läuft nach dem Öffnen weiter."""
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.execute(
+        """
+        CREATE TABLE contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            type TEXT, email TEXT, phone TEXT, channel TEXT, notes TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL UNIQUE,
+            contact_id INTEGER REFERENCES contacts(id),
+            status TEXT NOT NULL DEFAULT 'anfrage',
+            phase_note TEXT, markdown_log_path TEXT, next_action TEXT, waiting_on TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    now = "2026-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO contacts (name, created_at, updated_at) VALUES ('Alt', ?, ?)", (now, now)
+    )
+    conn.execute(
+        "INSERT INTO projects (title, created_at, updated_at) VALUES ('Altprojekt', ?, ?)",
+        (now, now),
+    )
+    conn.commit()
+
+    repo = Repository(conn)
+
+    contact = repo.get_contact_by_name("Alt")
+    project = repo.get_project_by_title("Altprojekt")
+    assert contact is not None
+    assert contact.ort_id is None
+    assert project is not None
+    assert project.ort_id is None
+    # Migration ist idempotent — erneutes Öffnen darf nicht scheitern.
+    Repository(conn)
 
 
 # --------------------------------------------------------------------------- #
