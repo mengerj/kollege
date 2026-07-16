@@ -12,13 +12,14 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.24 — Testphase-Vorbereitung: Datenschutz-Quick-Wins** (siehe
+**Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar** (siehe
 Details/DoD weiter unten).
 
 **Kontext: Testphase mit der Nutzerin steht an.** Der Bot wird als Linked Device
 an *ihrem* Signal-Konto verknüpft (QR-Scan), Host bleibt vorerst der Laptop,
-Modell bleibt `mistral-medium-3.1`. Dafür zuerst die Datenschutz-Quick-Wins
-(8.24), dann die drei Testphasen-Features in dieser Reihenfolge:
+Modell bleibt `mistral-medium-3.1` via OpenRouter. Die Nutzerin willigt in die
+Datenverarbeitung schriftlich ein (Dokument liegt in `docs/privat/`,
+gitignored). Die drei Testphasen-Features in dieser Reihenfolge:
 **8.25** (neue Projekte sichtbar) → **8.26** (Örtlichkeit als vierte Entität) →
 **8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
 
@@ -77,8 +78,7 @@ Stufe B für **Kontakte** (Umbenennung + Merge).
 | 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
 | 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
 | 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ⬜ offen (automatisch anschließbar) |
-| 8.24 | Testphase-Vorbereitung: Datenschutz-Quick-Wins | 1.5 | ▶ nächster Schritt |
-| 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ⬜ offen |
+| 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ▶ nächster Schritt |
 | 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ⬜ offen |
 | 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
@@ -190,60 +190,6 @@ Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
 Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
 doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
 Regression; CI-Kette grün.
-
-### Schritt 8.24 — Testphase-Vorbereitung: Datenschutz-Quick-Wins ⬜
-
-**Motiv.** Erste echte Testphase mit der Nutzerin: Bot als Linked Device an
-**ihrem** Signal-Konto, Host ist der Laptop des Entwicklers, Modell bleibt
-`mistral-medium-3.1`. Bevor echte Personendaten fließen, die **einfachen**
-Datenschutz-Hebel ziehen (Designprinzip 5) — die große Anbieter-Evaluierung
-bleibt in **9.1**, hier nur der Minimal-Vorgriff.
-
-**Ansatz.**
-- **LLM-Anbindung bleibt in der Testphase bewusst OpenRouter →
-  `mistral-medium-3.1`** (Entscheidung Nutzer 2026-07-16: direkter
-  Mistral-Account erfordert separates Guthaben — Aufwand/Nutzen für die
-  Testphase nicht gerechtfertigt). Datenlage laut Policy: **kein Training**
-  auf Prompts, Aufbewahrung bis **30 Tage (anonymisiert)**; das Modell läuft
-  bei Mistral (EU/Frankreich), das **Routing** aber über OpenRouter
-  (US-Intermediär). Das ist eine bewusste, **in der Einwilligung offengelegte**
-  Abweichung vom EU-only-Ziel — Behebung bleibt in **9.1**. Im Schritt:
-  Policy-Aussagen verifizieren und OpenRouter-Account-Einstellungen härten
-  (Logging-Opt-out, ggf. Provider-Pinning auf Mistral, damit Anfragen nicht
-  bei einem anderen Host des Modells landen).
-- **Tracing bleibt AN — aber mit informierter Einwilligung** (Entscheidung
-  Nutzer 2026-07-16): Ohne Traces ist Verbessern im Blindflug; statt sie
-  abzuschalten wird die Nutzerin transparent informiert und willigt schriftlich
-  ein (Monitoring während der 2-wöchigen Testphase, Löschzusage danach,
-  Migrations-Ausnahme bei Fortsetzung). Dokument liegt vor:
-  `docs/privat/Einwilligung_Testphase.md` (gitignored) — dort ist auch die
-  OpenRouter-Vermittlung offengelegt, inkl. Hinweis, dass künftige Versionen
-  strengeren Datenschutz bekommen (direkte EU-Anbindung + AVV, siehe 9.1).
-- **Log-Hygiene:** `kollege.log` und Konsolen-Logging auf personenbezogene
-  Volltexte prüfen (Transkript-Volltext raus oder auf DEBUG-Level absenken);
-  Aufbewahrung/Löschung alter Traces und Logs kurz regeln — konsistent mit der
-  Löschzusage aus der Einwilligung (spätestens 2 Wochen nach Testphasen-Ende
-  alles löschen; manuelles Lösch-Skript oder dokumentierte Regel reicht).
-- **Onboarding-Checkliste für die Nutzerin** (kurzes Doc in `docs/`):
-  QR-Verknüpfung Schritt für Schritt (Token läuft nach wenigen Minuten ab →
-  **gemeinsam live** machen, QR nicht per Mail/Chat vorab verschicken),
-  KI-Transparenz-Hinweis (was der Bot ist, was gespeichert wird, wo),
-  Einwilligung unterschreiben lassen (siehe oben), Host-Laptop: FileVault
-  aktiv, Bildschirmsperre. Hinweis dokumentieren, dass als Linked Device
-  technisch **alle** Nachrichten ihres Kontos am Laptop ankommen, der Bot aber
-  nur Note-to-Self verarbeitet und Fremd-`dataMessage` verwirft (Verhalten aus
-  8.5, siehe [live-testing-guide.md](docs/live-testing-guide.md)
-  §Stolpersteine).
-
-**Bewusst nicht im Scope.** Weitere Anbieter; Trace-Anonymisierung (Einsicht
-ist durch die Einwilligung gedeckt, Löschfrist geregelt).
-
-**DoD.** OpenRouter-Datenschutz-Einstellungen gesetzt und dokumentiert
-(Logging-Opt-out, Provider-Pinning geprüft); Policy-Aussagen (kein Training,
-30-Tage-Retention anonymisiert) verifiziert und in der Einwilligung korrekt
-abgebildet; keine Personendaten-Volltexte auf INFO-Level in `kollege.log`;
-Retention-Regel für Logs/Traces konsistent zur Löschzusage notiert;
-Onboarding-/Datenschutz-Checkliste in `docs/` vorhanden; CI-Kette grün.
 
 ### Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar ⬜
 
