@@ -5,6 +5,38 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-16 — Roadmap-Planung Testphase (Doku-Session, keine Code-Änderung)
+
+**Auslöser.** Die Testphase mit der Nutzerin steht an: Bot wird als Linked
+Device an **ihrem** Signal-Konto verknüpft (QR-Scan, gemeinsam live wegen
+Token-Ablauf), Host bleibt der Laptop, Modell bleibt `mistral-medium-3.1`.
+
+**Neue Schritte in [ROADMAP.md](ROADMAP.md) (Details/DoD dort):**
+- **8.24 — Datenschutz-Quick-Wins:** Mistral **direkt** (La Plateforme, EU)
+  statt über OpenRouter (US-Intermediär) — Minimal-Vorgriff auf 9.1;
+  Log-/Trace-Hygiene; Onboarding-/Datenschutz-Checkliste für die Nutzerin.
+- **8.25 — Neue Projekte sichtbar:** implizit via `get_or_create_project`
+  angelegte Projekte erscheinen bislang weder im Vorschlag noch in der
+  ✅-Bestätigung (Human-in-the-loop-Lücke, live aufgefallen).
+- **8.26 — Vierte Entität „Örtlichkeit":** Name/Adresse/Flurnummer, verknüpfbar
+  mit Kontakten und Projekten; volle Kette Modell→DB→Extraktion→Commands.
+- **8.27 — Proaktive Erinnerungen:** Nachfrage-Ping + formatierte
+  Offene-Aufgaben-Liste (mit Projekt/Kontakt/Ort-Bezug), Zeitplan frei
+  konfigurierbar per Datei (z. B. Mo+Fr morgens/abends, Di–Do nachmittags);
+  Vorgriff auf Schritt 11.
+
+**Entscheidungen.** Reihenfolge 8.24 → 8.25 → 8.26 → 8.27 (Datenschutz vor
+echten Daten, kleines Feature zuerst, Erinnerungen zuletzt, weil 8.27 die
+Ort-Bezüge aus 8.26 anzeigen soll). **8.23** (Token-Sparen) bleibt offen und
+jederzeit automatisch anschließbar — blockiert die Testphase nicht; nach 8.26
+wächst der Prompt-Kontext sogar, was 8.23 relevanter macht.
+
+**Offene Punkte.** AVV mit Mistral formal abschließen (organisatorisch, 17);
+Ort-Verknüpfung FK vs. n:m wird in 8.26 entschieden; Scheduler-Wahl
+(APScheduler vs. eigener Ticker) in 8.27.
+
+---
+
 ## 2026-07-03 — Schritt 8.22 — Löschen von Einträgen (Kontakte/Projekte/Aufgaben, automatische Session)
 
 **Auslöser.** Direkt aus dem Live-Test-Trace vom selben Tag (siehe Eintrag
