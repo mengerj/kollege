@@ -5,6 +5,18 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-16 — Schritt 8.24 gestrichen (Doku, gleiche Session wie unten)
+
+**Entscheidung Nutzer.** Die Datenschutz-Quick-Wins (8.24) werden **nicht**
+umgesetzt — die Testphase ist stattdessen vollständig über die **schriftliche
+Einwilligung** der Nutzerin gedeckt (`docs/privat/Einwilligung_Testphase.md`,
+gitignored; deklariert OpenRouter→Mistral-Routing, 30-Tage-Retention,
+Monitoring, Löschzusage). Detailblock aus der Roadmap entfernt; nächster
+Schritt ist **8.25**. Strengerer Datenschutz (direkte EU-Anbindung + AVV)
+bleibt unverändert in **9.1** verortet.
+
+---
+
 ## 2026-07-16 — Roadmap-Planung Testphase (Doku-Session, keine Code-Änderung)
 
 **Auslöser.** Die Testphase mit der Nutzerin steht an: Bot wird als Linked
