@@ -21,6 +21,7 @@ from kollege.config import Settings
 from kollege.db import Repository
 from kollege.models import (
     ExtractedContact,
+    ExtractedOrt,
     ExtractedProjectUpdate,
     ExtractedTask,
     ExtractionResult,
@@ -34,6 +35,7 @@ from kollege.orchestrator import (
     format_contacts,
     format_date_de,
     format_open_tasks,
+    format_orte,
     format_projects,
     format_proposal,
     persist_result,
@@ -221,6 +223,44 @@ def test_format_proposal_without_repo_shows_no_marker() -> None:
     result = ExtractionResult(tasks=[ExtractedTask(title="X", project="Irgendein Projekt")])
     text = format_proposal(result)
     assert "neu" not in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# format_proposal — Örtlichkeiten (Schritt 8.26)
+# ---------------------------------------------------------------------------
+
+
+def test_format_proposal_shows_location_with_details() -> None:
+    result = ExtractionResult(
+        locations=[ExtractedOrt(name="Flurstück 12", adresse="Musterweg 3", flurnummer="12/3")]
+    )
+    text = format_proposal(result)
+    assert "📍 Örtlichkeit: Flurstück 12" in text
+    assert "Musterweg 3" in text
+    assert "Flur 12/3" in text
+
+
+def test_format_proposal_marks_unknown_location_as_new(repo: Repository) -> None:
+    result = ExtractionResult(locations=[ExtractedOrt(name="Neues Flurstück")])
+    text = format_proposal(result, repo)
+    assert "Neues Flurstück — neu" in text
+
+
+def test_format_proposal_does_not_mark_existing_location(repo: Repository) -> None:
+    repo.get_or_create_ort("Bekanntes Flurstück")
+    result = ExtractionResult(locations=[ExtractedOrt(name="Bekanntes Flurstück")])
+    text = format_proposal(result, repo)
+    assert "Bekanntes Flurstück" in text
+    assert "neu" not in text.lower()
+
+
+def test_format_proposal_location_shows_contact_and_project_refs() -> None:
+    result = ExtractionResult(
+        locations=[ExtractedOrt(name="Flurstück 12", contact="Familie Müller", project="Stadtpark")]
+    )
+    text = format_proposal(result)
+    assert "Kontakt: Familie Müller" in text
+    assert "Projekt: Stadtpark" in text
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +464,85 @@ def test_persist_result_summary_dedupes_same_new_project_across_tasks(
     summary = persist_result(result, None, repo, log_dir)
     assert summary.count == 2
     assert summary.new_projects == ["Doppelt Neu"]
+
+
+# ---------------------------------------------------------------------------
+# persist_result — Örtlichkeiten (Schritt 8.26)
+# ---------------------------------------------------------------------------
+
+
+def test_persist_result_location_creates_ort(repo: Repository, log_dir: Path) -> None:
+    result = ExtractionResult(
+        locations=[ExtractedOrt(name="Flurstück 12", adresse="Musterweg 3", flurnummer="12/3")]
+    )
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 1
+    ort = repo.get_ort_by_name("Flurstück 12")
+    assert ort is not None
+    assert ort.adresse == "Musterweg 3"
+    assert ort.flurnummer == "12/3"
+
+
+def test_persist_result_location_links_existing_contact(repo: Repository, log_dir: Path) -> None:
+    contact = repo.upsert_contact(ExtractedContact(name="Familie Müller"))
+    assert contact.id is not None
+    result = ExtractionResult(
+        locations=[ExtractedOrt(name="Flurstück 12", contact="Familie Müller")]
+    )
+    persist_result(result, None, repo, log_dir)
+    updated = repo.get_contact_by_id(contact.id)
+    assert updated is not None
+    assert updated.ort_id is not None
+
+
+def test_persist_result_location_links_and_creates_project(repo: Repository, log_dir: Path) -> None:
+    result = ExtractionResult(locations=[ExtractedOrt(name="Flurstück 12", project="Neuer Park")])
+    summary = persist_result(result, None, repo, log_dir)
+    project = repo.get_project_by_title("Neuer Park")
+    assert project is not None
+    assert project.ort_id is not None
+    assert summary.new_projects == ["Neuer Park"]
+
+
+def test_persist_result_location_without_contact_or_project_only_creates_ort(
+    repo: Repository, log_dir: Path
+) -> None:
+    result = ExtractionResult(locations=[ExtractedOrt(name="Flurstück 12")])
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 1
+    assert repo.get_ort_by_name("Flurstück 12") is not None
+
+
+def test_handle_message_e2e_location_proposal_and_confirmation(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """E2E (Schritt 8.26): Sprachnotiz mit Ort → Vorschlag → Bestätigung → DB."""
+    result = ExtractionResult(
+        locations=[
+            ExtractedOrt(
+                name="Flurstück 12",
+                adresse="Musterweg 3",
+                flurnummer="12/3",
+                project="Neuer Park",
+            )
+        ]
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=result):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Neues Flurstück notiert."))
+
+    proposal_text = channel.sent[-1][1]
+    assert "📍 Örtlichkeit: Flurstück 12 — neu" in proposal_text
+    assert SENDER in orc._pending
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    ort = repo.get_ort_by_name("Flurstück 12")
+    assert ort is not None
+    assert ort.adresse == "Musterweg 3"
+    project = repo.get_project_by_title("Neuer Park")
+    assert project is not None
+    assert project.ort_id == ort.id
+    assert SENDER not in orc._pending
 
 
 # ---------------------------------------------------------------------------
@@ -1402,6 +1521,10 @@ def test_format_projects_empty() -> None:
     assert format_projects([]) == "Keine Projekte gespeichert."
 
 
+def test_format_orte_empty() -> None:
+    assert format_orte([]) == "Keine Örtlichkeiten gespeichert."
+
+
 def test_command_offen_lists_open_tasks(
     orc: Orchestrator, channel: MemoryChannel, repo: Repository
 ) -> None:
@@ -1445,6 +1568,14 @@ def test_command_projekte_lists_projects(
     assert "Kräutergarten Aibling" in channel.sent[0][1]
 
 
+def test_command_orte_lists_locations(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    repo.get_or_create_ort("Flurstück 12")
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/orte"))
+    assert "Flurstück 12" in channel.sent[0][1]
+
+
 def test_command_erledigt_closes_exactly_one_task(
     orc: Orchestrator, channel: MemoryChannel, repo: Repository
 ) -> None:
@@ -1483,6 +1614,7 @@ def test_command_hilfe_lists_all_commands(orc: Orchestrator, channel: MemoryChan
         "/dringend",
         "/kontakte",
         "/projekte",
+        "/orte",
         "/erledigt",
         "/loeschen",
         "/zuruecksetzen",
@@ -1605,6 +1737,45 @@ def test_command_loeschen_aufgabe_unknown_id_gives_friendly_message(
     assert "gefunden" in text.lower()
 
 
+def test_command_loeschen_ort_shows_preview_and_waits_for_confirmation(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    ort = repo.get_or_create_ort("Flurstück 12")
+    assert ort.id is not None
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen ort {ort.id}"))
+
+    text = channel.sent[0][1]
+    assert "Flurstück 12" in text
+    assert "löschen" in text.lower()
+    assert SENDER in orc._pending_deletions
+    assert repo.get_ort_by_name("Flurstück 12") is not None  # noch nicht gelöscht
+
+
+def test_command_loeschen_ort_unknown_id_gives_friendly_message(
+    orc: Orchestrator, channel: MemoryChannel
+) -> None:
+    orc.handle_message(IncomingMessage(sender=SENDER, text="/loeschen ort 999"))
+    text = channel.sent[0][1]
+    assert "999" in text
+    assert "gefunden" in text.lower()
+
+
+def test_confirm_loeschen_ort_deletes_it(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    ort = repo.get_or_create_ort("Flurstück 12")
+    assert ort.id is not None
+    orc.handle_message(IncomingMessage(sender=SENDER, text=f"/loeschen ort {ort.id}"))
+    channel.sent.clear()
+
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+
+    assert SENDER not in orc._pending_deletions
+    assert repo.get_ort_by_name("Flurstück 12") is None
+    assert "✅" in channel.sent[0][1]
+
+
 def test_confirm_loeschen_kontakt_deletes_it(
     orc: Orchestrator, channel: MemoryChannel, repo: Repository
 ) -> None:
@@ -1700,6 +1871,7 @@ def test_command_zuruecksetzen_shows_totals_and_waits_for_confirmation(
     repo.upsert_contact(ExtractedContact(name="Familie Müller"))
     repo.get_or_create_project("Kräutergarten")
     repo.create_task(Task(title="Beete anlegen"))
+    repo.get_or_create_ort("Flurstück 12")
 
     orc.handle_message(IncomingMessage(sender=SENDER, text="/zuruecksetzen"))
 
@@ -1707,6 +1879,7 @@ def test_command_zuruecksetzen_shows_totals_and_waits_for_confirmation(
     assert "1 Kontakt" in text
     assert "1 Projekt" in text
     assert "1 Aufgabe" in text
+    assert "1 Örtlichkeit" in text
     assert SENDER in orc._pending_deletions
 
 
@@ -1724,6 +1897,7 @@ def test_confirm_zuruecksetzen_clears_everything(
     repo.upsert_contact(ExtractedContact(name="Familie Müller"))
     repo.get_or_create_project("Kräutergarten")
     repo.create_task(Task(title="Beete anlegen"))
+    repo.get_or_create_ort("Flurstück 12")
     orc.handle_message(IncomingMessage(sender=SENDER, text="/zuruecksetzen"))
     channel.sent.clear()
 
@@ -1732,6 +1906,7 @@ def test_confirm_zuruecksetzen_clears_everything(
     assert repo.get_all_contacts() == []
     assert repo.get_all_projects() == []
     assert repo.get_all_tasks() == []
+    assert repo.get_all_orte() == []
     assert "✅" in channel.sent[0][1]
 
 

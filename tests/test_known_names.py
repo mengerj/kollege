@@ -34,6 +34,7 @@ from kollege.models import (
     Contact,
     ExtractedContact,
     ExtractionResult,
+    Ort,
     Project,
 )
 from kollege.orchestrator import Orchestrator
@@ -57,32 +58,42 @@ def _project(title: str, updated_at: datetime.datetime | None = None) -> Project
     return Project(title=title, created_at=dt, updated_at=dt)
 
 
+def _ort(name: str, updated_at: datetime.datetime | None = None) -> Ort:
+    dt = updated_at or datetime.datetime.now(tz=datetime.UTC)
+    return Ort(name=name, created_at=dt, updated_at=dt)
+
+
 # ---------------------------------------------------------------------------
 # filter_known_names
 # ---------------------------------------------------------------------------
 
 
 def test_filter_known_names_empty() -> None:
-    names, projects = filter_known_names([], [])
+    names, projects, orte = filter_known_names([], [])
     assert names == []
     assert projects == []
+    assert orte == []
 
 
 def test_filter_known_names_below_limit() -> None:
     contacts = [_contact("Frau Schmidt"), _contact("Familie Wagner")]
     projects = [_project("Stadtpark"), _project("Bebauungsplan")]
-    c_names, p_names = filter_known_names(contacts, projects, max_names=80)
+    orte = [_ort("Flurstück 12")]
+    c_names, p_names, o_names = filter_known_names(contacts, projects, orte, max_names=80)
     assert set(c_names) == {"Frau Schmidt", "Familie Wagner"}
     assert set(p_names) == {"Stadtpark", "Bebauungsplan"}
+    assert set(o_names) == {"Flurstück 12"}
 
 
 def test_filter_known_names_respects_max_limit() -> None:
     # Erzeuge mehr Namen als das Limit erlaubt.
     contacts = [_contact(f"Kontakt {i}") for i in range(60)]
     projects = [_project(f"Projekt {i}") for i in range(60)]
-    c_names, p_names = filter_known_names(contacts, projects, max_names=10)
-    assert len(c_names) <= 5
-    assert len(p_names) <= 5
+    orte = [_ort(f"Ort {i}") for i in range(60)]
+    c_names, p_names, o_names = filter_known_names(contacts, projects, orte, max_names=9)
+    assert len(c_names) <= 3
+    assert len(p_names) <= 3
+    assert len(o_names) <= 3
 
 
 def test_filter_known_names_sorts_by_updated_at_descending() -> None:
@@ -95,9 +106,19 @@ def test_filter_known_names_sorts_by_updated_at_descending() -> None:
         _contact("Neu", updated_at=new),
         _contact("Neuer", updated_at=newer),
     ]
-    c_names, _ = filter_known_names(contacts, [], max_names=4)
+    c_names, _, _ = filter_known_names(contacts, [], max_names=6)
     assert c_names[0] == "Neuer"
     assert c_names[1] == "Neu"
+
+
+def test_filter_known_names_without_orte_returns_empty_third_list() -> None:
+    """``orte`` ist optional (Rückwärtskompatibilität für Aufrufer ohne Orte)."""
+    c_names, p_names, o_names = filter_known_names(
+        [_contact("Frau Schmidt")], [_project("Stadtpark")]
+    )
+    assert c_names == ["Frau Schmidt"]
+    assert p_names == ["Stadtpark"]
+    assert o_names == []
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +152,20 @@ def test_build_known_names_context_both() -> None:
     assert "Projekte" in ctx
 
 
+def test_build_known_names_context_orte_only() -> None:
+    ctx = build_known_names_context([], [], ["Flurstück 12"])
+    assert "Flurstück 12" in ctx
+    assert "Orte" in ctx
+
+
+def test_build_known_names_context_all_three() -> None:
+    ctx = build_known_names_context(["Frau Schmidt"], ["Stadtpark"], ["Flurstück 12"])
+    assert "Frau Schmidt" in ctx
+    assert "Stadtpark" in ctx
+    assert "Flurstück 12" in ctx
+    assert "Orte" in ctx
+
+
 def test_build_known_names_context_contains_normalisation_hint() -> None:
     ctx = build_known_names_context(["Frau Schmidt"], [])
     assert "Normali" in ctx or "normali" in ctx or "gleich" in ctx or "Gleich" in ctx
@@ -158,6 +193,15 @@ def test_get_known_names_context_with_contacts_and_projects() -> None:
     ctx = get_known_names_context(repo)
     assert "Frau Schmidt" in ctx
     assert "Stadtpark Revitalisierung" in ctx
+
+
+def test_get_known_names_context_with_orte() -> None:
+    repo = _repo()
+    repo.get_or_create_ort("Flurstück 12")
+
+    ctx = get_known_names_context(repo)
+    assert "Flurstück 12" in ctx
+    assert "Orte" in ctx
 
 
 # ---------------------------------------------------------------------------

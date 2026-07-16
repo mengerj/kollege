@@ -17,6 +17,7 @@ from typing import Any, Concatenate, cast
 from kollege.models import (
     Contact,
     ExtractedContact,
+    Ort,
     Project,
     ProjectStatus,
     Task,
@@ -45,6 +46,17 @@ def _synchronized[**P, R](
     return cast("Callable[Concatenate[Repository, P], R]", wrapper)
 
 
+_DDL_ORTE = """
+CREATE TABLE IF NOT EXISTS orte (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    adresse     TEXT,
+    flurnummer  TEXT,
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+)
+"""
+
 _DDL_CONTACTS = """
 CREATE TABLE IF NOT EXISTS contacts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +66,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     phone       TEXT,
     channel     TEXT,
     notes       TEXT,
+    ort_id      INTEGER REFERENCES orte(id),
     created_at  TEXT    NOT NULL,
     updated_at  TEXT    NOT NULL
 )
@@ -69,6 +82,7 @@ CREATE TABLE IF NOT EXISTS projects (
     markdown_log_path   TEXT,
     next_action         TEXT,
     waiting_on          TEXT,
+    ort_id              INTEGER REFERENCES orte(id),
     created_at          TEXT    NOT NULL,
     updated_at          TEXT    NOT NULL
 )
@@ -98,7 +112,7 @@ def _now() -> str:
 
 
 class Repository:
-    """Alle DB-Operationen für Kontakte, Projekte und Tasks."""
+    """Alle DB-Operationen für Kontakte, Projekte, Tasks und Örtlichkeiten."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -109,10 +123,24 @@ class Repository:
 
     def _create_schema(self) -> None:
         cur = self._conn.cursor()
+        cur.execute(_DDL_ORTE)
         cur.execute(_DDL_CONTACTS)
         cur.execute(_DDL_PROJECTS)
         cur.execute(_DDL_TASKS)
+        self._migrate_ort_columns(cur)
         self._conn.commit()
+
+    def _migrate_ort_columns(self, cur: sqlite3.Cursor) -> None:
+        """Fügt ``ort_id`` zu bereits bestehenden ``contacts``/``projects``-Tabellen hinzu.
+
+        ``CREATE TABLE IF NOT EXISTS`` legt die Spalte nur bei einer frischen DB an;
+        eine schon existierende Datei aus der Zeit vor Schritt 8.26 hat sie noch
+        nicht — SQLite kennt kein ``ADD COLUMN IF NOT EXISTS``, daher der Check.
+        """
+        for table in ("contacts", "projects"):
+            columns = {row["name"] for row in cur.execute(f"PRAGMA table_info({table})")}
+            if "ort_id" not in columns:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN ort_id INTEGER REFERENCES orte(id)")
 
     # ------------------------------------------------------------------ #
     # Contacts                                                             #
@@ -183,6 +211,94 @@ class Repository:
 
     def _row_to_contact(self, row: Any) -> Contact:
         return Contact.model_validate(dict(row))
+
+    @_synchronized
+    def link_contact_ort(self, contact_id: int, ort_id: int) -> Contact:
+        """Kontakt mit einer Örtlichkeit verknüpfen (Schritt 8.26)."""
+        self._conn.execute("UPDATE contacts SET ort_id = ? WHERE id = ?", (ort_id, contact_id))
+        self._conn.commit()
+        result = self.get_contact_by_id(contact_id)
+        assert result is not None
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Örtlichkeiten (Schritt 8.26)                                         #
+    # ------------------------------------------------------------------ #
+
+    @_synchronized
+    def get_or_create_ort(
+        self, name: str, adresse: str | None = None, flurnummer: str | None = None
+    ) -> Ort:
+        """Örtlichkeit per Namensabgleich holen oder neu anlegen.
+
+        Exact-name-Dedup wie bei Kontakten/Projekten. Ist die Örtlichkeit bereits
+        vorhanden, werden ``adresse``/``flurnummer`` nur überschrieben, wenn ein
+        neuer, nicht-``None``-Wert mitgegeben wird — ``None`` heißt „unverändert
+        lassen" (analog ``upsert_contact``).
+        """
+        existing = self.get_ort_by_name(name)
+        now = _now()
+
+        if existing is not None:
+            updates: dict[str, Any] = {}
+            if adresse is not None:
+                updates["adresse"] = adresse
+            if flurnummer is not None:
+                updates["flurnummer"] = flurnummer
+            if updates:
+                updates["updated_at"] = now
+                set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+                updates["id"] = existing.id
+                self._conn.execute(f"UPDATE orte SET {set_clause} WHERE id = :id", updates)
+                self._conn.commit()
+            assert existing.id is not None
+            result = self.get_ort_by_id(existing.id)
+            assert result is not None
+            return result
+
+        cur = self._conn.execute(
+            """
+            INSERT INTO orte (name, adresse, flurnummer, created_at, updated_at)
+            VALUES (:name, :adresse, :flurnummer, :created_at, :updated_at)
+            """,
+            {
+                "name": name,
+                "adresse": adresse,
+                "flurnummer": flurnummer,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        self._conn.commit()
+        assert cur.lastrowid is not None
+        result = self.get_ort_by_id(cur.lastrowid)
+        assert result is not None
+        return result
+
+    @_synchronized
+    def get_ort_by_name(self, name: str) -> Ort | None:
+        row = self._conn.execute("SELECT * FROM orte WHERE name = ?", (name,)).fetchone()
+        return self._row_to_ort(row) if row is not None else None
+
+    @_synchronized
+    def get_ort_by_id(self, ort_id: int) -> Ort | None:
+        row = self._conn.execute("SELECT * FROM orte WHERE id = ?", (ort_id,)).fetchone()
+        return self._row_to_ort(row) if row is not None else None
+
+    def _row_to_ort(self, row: Any) -> Ort:
+        return Ort.model_validate(dict(row))
+
+    @_synchronized
+    def list_orte(self) -> list[Ort]:
+        """Alle Örtlichkeiten, alphabetisch sortiert — für das Kommando ``/orte``."""
+        rows = self._conn.execute("SELECT * FROM orte ORDER BY name COLLATE NOCASE").fetchall()
+        return [self._row_to_ort(r) for r in rows]
+
+    @_synchronized
+    def get_all_orte(self) -> list[Ort]:
+        """Alle Örtlichkeiten – für den Bekannte-Namen-Kontext (Schritt 8.7-Mechanik)."""
+        rows = self._conn.execute("SELECT * FROM orte").fetchall()
+        return [self._row_to_ort(r) for r in rows]
 
     # ------------------------------------------------------------------ #
     # Projects                                                             #
@@ -267,6 +383,15 @@ class Repository:
 
     def _row_to_project(self, row: Any) -> Project:
         return Project.model_validate(dict(row))
+
+    @_synchronized
+    def link_project_ort(self, project_id: int, ort_id: int) -> Project:
+        """Projekt mit einer Örtlichkeit verknüpfen (Schritt 8.26)."""
+        self._conn.execute("UPDATE projects SET ort_id = ? WHERE id = ?", (ort_id, project_id))
+        self._conn.commit()
+        result = self._get_project_by_id(project_id)
+        assert result is not None
+        return result
 
     # ------------------------------------------------------------------ #
     # Tasks                                                                #
@@ -429,15 +554,30 @@ class Repository:
         self._conn.commit()
 
     @_synchronized
+    def delete_ort(self, ort_id: int) -> None:
+        """Örtlichkeit löschen; Referenzen in Kontakten/Projekten werden gelöst.
+
+        ``ValueError`` bei unbekannter ID.
+        """
+        if self.get_ort_by_id(ort_id) is None:
+            raise ValueError(f"Örtlichkeit {ort_id} nicht gefunden")
+        self._conn.execute("UPDATE contacts SET ort_id = NULL WHERE ort_id = ?", (ort_id,))
+        self._conn.execute("UPDATE projects SET ort_id = NULL WHERE ort_id = ?", (ort_id,))
+        self._conn.execute("DELETE FROM orte WHERE id = ?", (ort_id,))
+        self._conn.commit()
+
+    @_synchronized
     def reset_all(self) -> None:
-        """Alle Kontakte, Projekte und Aufgaben löschen (Testdaten-Reset).
+        """Alle Kontakte, Projekte, Aufgaben und Örtlichkeiten löschen (Testdaten-Reset).
 
         Reihenfolge wegen Fremdschlüsseln: Aufgaben zuerst (referenzieren Projekte/
-        Kontakte), dann Projekte (referenzieren Kontakte), dann Kontakte.
+        Kontakte), dann Projekte (referenzieren Kontakte/Örtlichkeiten), dann
+        Kontakte (referenzieren Örtlichkeiten), dann Örtlichkeiten.
         """
         self._conn.execute("DELETE FROM tasks")
         self._conn.execute("DELETE FROM projects")
         self._conn.execute("DELETE FROM contacts")
+        self._conn.execute("DELETE FROM orte")
         self._conn.commit()
 
     # ------------------------------------------------------------------ #

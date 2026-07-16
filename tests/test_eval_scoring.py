@@ -16,7 +16,7 @@ import pytest
 from kollege.eval.fixtures import ExtractionExpectation
 from kollege.eval.runner import DEFAULT_THRESHOLD, run_fixture_n_times
 from kollege.eval.scoring import FixtureScore, score_result
-from kollege.models import ExtractedContact, ExtractedTask, ExtractionResult
+from kollege.models import ExtractedContact, ExtractedOrt, ExtractedTask, ExtractionResult
 
 # --------------------------------------------------------------------------- #
 # score_result                                                                 #
@@ -94,6 +94,33 @@ def test_forbidden_keyword_absent_does_not_flag() -> None:
     result = ExtractionResult(tasks=[ExtractedTask(title="Kunde in Aibling anrufen")])
     score = score_result(result, expected)
     assert not score.forbidden_hit
+
+
+# --------------------------------------------------------------------------- #
+# Örtlichkeiten (Schritt 8.26)                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_score_result_location_name_hit() -> None:
+    expected = ExtractionExpectation(min_locations=1, location_names=["Hinterberger"])
+    result = ExtractionResult(locations=[ExtractedOrt(name="Garten Hinterberger")])
+    score = score_result(result, expected)
+    assert score.hits == score.total
+    assert score.score == 1.0
+
+
+def test_score_result_missing_location_reduces_score() -> None:
+    expected = ExtractionExpectation(min_locations=1, location_names=["Hinterberger"])
+    result = ExtractionResult()
+    score = score_result(result, expected)
+    assert score.hits < score.total
+
+
+def test_over_extraction_flag_set_when_max_locations_exceeded() -> None:
+    expected = ExtractionExpectation(min_locations=1, max_locations=1)
+    result = ExtractionResult(locations=[ExtractedOrt(name="Ort A"), ExtractedOrt(name="Ort B")])
+    score = score_result(result, expected)
+    assert score.over_extraction
 
 
 # --------------------------------------------------------------------------- #

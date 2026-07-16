@@ -43,6 +43,7 @@ from kollege.eval import (
 )
 from kollege.models import (
     ExtractedContact,
+    ExtractedOrt,
     ExtractedProjectUpdate,
     ExtractedTask,
     ExtractionResult,
@@ -87,7 +88,14 @@ def _mock_result_from_expected(expected: ExtractionExpectation) -> ExtractionRes
         project_names.append(f"Projekt {len(project_names) + 1}")
     updates = [ExtractedProjectUpdate(project=p) for p in project_names]
 
-    return ExtractionResult(contacts=contacts, tasks=tasks, project_updates=updates)
+    location_names = list(expected.location_names)
+    while len(location_names) < expected.min_locations:
+        location_names.append(f"Ort {len(location_names) + 1}")
+    locations = [ExtractedOrt(name=n) for n in location_names]
+
+    return ExtractionResult(
+        contacts=contacts, tasks=tasks, project_updates=updates, locations=locations
+    )
 
 
 def _make_mock_model(result: ExtractionResult) -> FunctionModel:
@@ -110,6 +118,8 @@ def _print_result(fixture_id: str, result: ExtractionResult, score_pct: float) -
     for pu in result.project_updates:
         status = f" → {pu.status}" if pu.status else ""
         print(f"  Projekt : {pu.project}{status}")
+    for loc in result.locations:
+        print(f"  Ort     : {loc.name}")
     if result.clarification:
         print(f"  Rückfrage: {result.clarification}")
 
@@ -150,6 +160,7 @@ def test_eval_extraction(fixture: ExtractionFixture, real_llm: bool) -> None:
         assert len(out.contacts) >= fixture.expected.min_contacts
         assert len(out.tasks) >= fixture.expected.min_tasks
         assert len(out.project_updates) >= fixture.expected.min_project_updates
+        assert len(out.locations) >= fixture.expected.min_locations
 
 
 # --------------------------------------------------------------------------- #
@@ -206,3 +217,4 @@ def test_eval_revision(fixture: RevisionFixture, real_llm: bool) -> None:
         assert len(out.contacts) >= fixture.expected.min_contacts
         assert len(out.tasks) >= fixture.expected.min_tasks
         assert len(out.project_updates) >= fixture.expected.min_project_updates
+        assert len(out.locations) >= fixture.expected.min_locations

@@ -5,6 +5,62 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-16 — Schritt 8.26 — Vierte Entität „Örtlichkeit" (automatische Session)
+
+**Auslöser.** Nächster Schritt der Testphasen-Sequenz (8.25 → 8.26 → 8.27,
+siehe Roadmap-Kontext) — automatische Session ohne Nutzerin, wie in der
+8.25-Session vorbereitet.
+
+**Umsetzung.**
+- **Datenmodell** ([`models.py`](src/kollege/models.py)): `Ort` (DB-Modell) +
+  `ExtractedOrt` (LLM-Schema, mit `contact`/`project`-Namensauflösung wie
+  `ExtractedTask`) + `locations`-Feld in `ExtractionResult`. `Project.ort_id`
+  und `Contact.ort_id` (je höchstens ein Ort, kein n:m — wie in der Roadmap
+  vorgezeichnet).
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)): neue
+  `orte`-Tabelle + `get_or_create_ort`/`get_ort_by_name`/`get_ort_by_id`/
+  `list_orte`/`get_all_orte`/`link_contact_ort`/`link_project_ort`/
+  `delete_ort` (löst Zuordnung, kein Cascade — analog Kontakte).
+  **Schema-Migration**: `_migrate_ort_columns` prüft `PRAGMA table_info` und
+  fährt `ALTER TABLE … ADD COLUMN ort_id` nach, falls eine bestehende DB-Datei
+  (Zeit vor diesem Schritt) die Spalte noch nicht hat — per Test mit
+  handgebauter Alt-Schema-DB abgesichert.
+- **Extraktion** ([`agent/__init__.py`](src/kollege/agent/__init__.py)): neues
+  Tool `link_ort`; `filter_known_names` auf Drei-Wege-Aufteilung (Kontakte/
+  Projekte/Orte) umgestellt — **Breaking Change** am Rückgabetyp (2-Tuple →
+  3-Tuple), bewusst in Kauf genommen, `build_known_names_context` bleibt
+  abwärtskompatibel. `_format_result_for_prompt` zeigt Örtlichkeiten jetzt mit
+  — sonst gälte für Revisions-/Lücken-Prüfungs-Läufe dieselbe Verlust-Gefahr
+  wie bei Erledigungen/Änderungen vor dem 8.20-Fix (Regressionstest ergänzt).
+- **Oberfläche** ([`orchestrator.py`](src/kollege/orchestrator.py)): `📍`-Zeile
+  in `_result_items` inkl. Neu-Markierung (analog 8.25, jetzt auch für über
+  Örtlichkeiten referenzierte neue Projekte); `persist_result` legt
+  Örtlichkeiten an und verknüpft sie nach Kontakten/Projekten (damit eine
+  Verknüpfung auf einen im selben Vorschlag neu angelegten Kontakt/Projekt
+  greift); `/orte`, `/loeschen ort <id>`, `/zuruecksetzen`/`reset_all` zählen
+  Örtlichkeiten mit; `/hilfe` aktualisiert.
+- **Qualität**: zwei neue Eval-Fixtures (mit/ohne Adresse+Flurnummer, Projekt-
+  bzw. Kontaktverknüpfung); `ExtractionExpectation`/`score_result` um
+  `min_locations`/`max_locations`/`location_names` ergänzt (gleiches
+  deklaratives Muster wie bestehende Felder).
+
+Details/Motiv/Designentscheidungen siehe
+[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md#schritt-826--vierte-entität-örtlichkeit-nameadresseflurnummer-).
+
+**Tests.** 45 neue Tests über `test_models.py`, `test_db.py` (inkl.
+Migrationstest gegen eine handgebaute Alt-Schema-DB), `test_agent.py`,
+`test_orchestrator.py` (inkl. E2E: Sprachnotiz mit Ort → Vorschlag →
+Bestätigung → DB) und `test_known_names.py`; zwei neue Eval-Fixtures. 414
+Tests grün (vorher 369), `ruff`/`ruff format`/`mypy --strict` sauber.
+
+**Nächster Schritt.** **8.27** (proaktive Erinnerungen mit konfigurierbarem
+Zeitplan) — letzter der drei Testphasen-Schritte. **8.23** (Token-Sparen)
+bleibt weiterhin automatisch anschließbar und wird durch den neuen
+`[BEKANNTE NAMEN]`-Ortsblock noch relevanter. **8.5** bleibt der Schritt für
+die nächste Live-Session mit der Nutzerin.
+
+---
+
 ## 2026-07-16 — Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar (automatische Session)
 
 **Auslöser.** Live-Beobachtung: legt eine Aufgabe implizit ein neues Projekt

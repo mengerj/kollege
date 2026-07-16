@@ -112,6 +112,20 @@ class ExtractedCompletion(BaseModel):
     task_title: str
 
 
+class ExtractedOrt(BaseModel):
+    """Eine vom Agenten aus Text erkannte Örtlichkeit (Grundstück/Baustelle).
+
+    ``contact``/``project`` verknüpfen die Örtlichkeit optional mit einem
+    Kontakt bzw. Projekt (Namensauflösung wie bei ``ExtractedTask``).
+    """
+
+    name: str
+    adresse: str | None = None
+    flurnummer: str | None = None
+    contact: str | None = None
+    project: str | None = None
+
+
 class ExtractedTaskEdit(BaseModel):
     """Eine erkannte Änderung an einer bestehenden **offenen Aufgabe** (Schritt 8.19).
 
@@ -142,11 +156,17 @@ class ExtractionResult(BaseModel):
     project_updates: list[ExtractedProjectUpdate] = Field(default_factory=list)
     completed: list[ExtractedCompletion] = Field(default_factory=list)
     edits: list[ExtractedTaskEdit] = Field(default_factory=list)
+    locations: list[ExtractedOrt] = Field(default_factory=list)
     clarification: str | None = None
 
     def is_empty(self) -> bool:
         return not (
-            self.contacts or self.tasks or self.project_updates or self.completed or self.edits
+            self.contacts
+            or self.tasks
+            or self.project_updates
+            or self.completed
+            or self.edits
+            or self.locations
         )
 
 
@@ -161,6 +181,7 @@ class Contact(BaseModel):
     phone: str | None = None
     channel: Channel | None = None
     notes: str | None = None
+    ort_id: int | None = None
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
@@ -174,6 +195,23 @@ class Project(BaseModel):
     markdown_log_path: str | None = None
     next_action: str | None = None
     waiting_on: WaitingOn | None = None
+    ort_id: int | None = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class Ort(BaseModel):
+    """Eine Örtlichkeit (Grundstück/Baustelle) — Schritt 8.26.
+
+    Verknüpfbar mit Kontakten und Projekten (``Contact.ort_id``/``Project.ort_id``);
+    bewusst kein n:m, bis der Bedarf real wird (ein Projekt spielt an höchstens
+    einem Ort, analog ein Kontakt).
+    """
+
+    id: int | None = None
+    name: str
+    adresse: str | None = None
+    flurnummer: str | None = None
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 

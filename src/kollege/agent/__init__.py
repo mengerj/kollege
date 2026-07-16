@@ -31,10 +31,12 @@ from kollege.models import (
     Contact,
     ContactType,
     ExtractedContact,
+    ExtractedOrt,
     ExtractedProjectUpdate,
     ExtractedTask,
     ExtractedTaskEdit,
     ExtractionResult,
+    Ort,
     Project,
     ProjectStatus,
     Task,
@@ -67,33 +69,42 @@ _MAX_KNOWN_NAMES = 80
 def filter_known_names(
     contacts: list[Contact],
     projects: list[Project],
+    orte: list[Ort] | None = None,
     max_names: int = _MAX_KNOWN_NAMES,
-) -> tuple[list[str], list[str]]:
-    """Bekannte Kontakt- und Projektnamen vorfiltern.
+) -> tuple[list[str], list[str], list[str]]:
+    """Bekannte Kontakt-, Projekt- und Ortsnamen vorfiltern.
 
     Sortiert nach ``updated_at`` absteigend (kürzlich aktiv → zuerst) und
-    begrenzt auf ``max_names // 2`` je Kategorie, damit der Kontext nicht
+    begrenzt auf ``max_names // 3`` je Kategorie, damit der Kontext nicht
     unbegrenzt wächst. Verhindert Kontext-Überschwemmung bei großer DB.
     """
-    half = max(1, max_names // 2)
+    orte = orte if orte is not None else []
+    third = max(1, max_names // 3)
     sorted_contacts = sorted(contacts, key=lambda c: c.updated_at, reverse=True)
     sorted_projects = sorted(projects, key=lambda p: p.updated_at, reverse=True)
-    return [c.name for c in sorted_contacts[:half]], [p.title for p in sorted_projects[:half]]
+    sorted_orte = sorted(orte, key=lambda o: o.updated_at, reverse=True)
+    return (
+        [c.name for c in sorted_contacts[:third]],
+        [p.title for p in sorted_projects[:third]],
+        [o.name for o in sorted_orte[:third]],
+    )
 
 
 def build_known_names_context(
     contact_names: list[str],
     project_names: list[str],
+    ort_names: list[str] | None = None,
 ) -> str:
     """Formatiert bekannte Namen als Kontext-Block für den Agenten.
 
-    Gibt einen leeren String zurück, wenn beide Listen leer sind.
+    Gibt einen leeren String zurück, wenn alle Listen leer sind.
     Der Block wird dem Transkript vorangestellt und weist den Agenten an,
     Namen aus dem Transkript gegen die Liste abzugleichen (Whisper-Verhörer
     wie „Herr Schnitt" → „Schmidt" können so ohne Revisions-Schleife
     korrigiert werden).
     """
-    if not contact_names and not project_names:
+    ort_names = ort_names if ort_names is not None else []
+    if not contact_names and not project_names and not ort_names:
         return ""
     lines: list[str] = [
         "[BEKANNTE NAMEN — nur zur Normalisierung, nicht als neue Einträge extrahieren]",
@@ -102,6 +113,8 @@ def build_known_names_context(
         lines.append("Kontakte: " + ", ".join(contact_names))
     if project_names:
         lines.append("Projekte: " + ", ".join(project_names))
+    if ort_names:
+        lines.append("Orte: " + ", ".join(ort_names))
     lines.append(
         "Gleiche Namen im Transkript mit dieser Liste ab: "
         "Falls ein Name einem bekannten Namen stark ähnelt (z. B. »Herr Schnitt« → »Schmidt«), "
@@ -122,8 +135,9 @@ def get_known_names_context(
     """
     contacts = repo.get_all_contacts()
     projects = repo.get_all_projects()
-    c_names, p_names = filter_known_names(contacts, projects, max_names)
-    return build_known_names_context(c_names, p_names)
+    orte = repo.get_all_orte()
+    c_names, p_names, o_names = filter_known_names(contacts, projects, orte, max_names)
+    return build_known_names_context(c_names, p_names, o_names)
 
 
 def build_open_tasks_context(tasks: list[Task]) -> str:
@@ -172,6 +186,8 @@ Extrahiere:
 - Kontakte (Personen/Firmen, die erwähnt werden)
 - Aufgaben (To-Dos, Fristen, Zeitfenster)
 - Projektstatus-Hinweise (Statusänderungen, nächste Schritte, wer wartet auf wen)
+- Örtlichkeiten (Grundstücke/Baustellen: Name, ggf. Adresse und Flurnummer;
+  optional verknüpft mit einem Kontakt und/oder Projekt)
 - Erledigungen bestehender Aufgaben (siehe unten)
 - Änderungen an bestehenden Aufgaben (siehe unten)
 
@@ -319,6 +335,33 @@ def create_task(
 
 
 @agent.tool
+def link_ort(
+    ctx: RunContext[Repository],
+    name: str,
+    adresse: str | None = None,
+    flurnummer: str | None = None,
+    contact_name: str | None = None,
+    project_title: str | None = None,
+) -> str:
+    """Örtlichkeit speichern oder aktualisieren (Namens-Dedup) und optional verknüpfen.
+
+    contact_name: verknüpft mit einem bestehenden Kontakt (muss bereits existieren).
+    project_title: verknüpft mit einem Projekt (wird bei Bedarf angelegt, wie bei create_task).
+    """
+    ort = ctx.deps.get_or_create_ort(name, adresse=adresse, flurnummer=flurnummer)
+    assert ort.id is not None
+    if contact_name:
+        c = ctx.deps.get_contact_by_name(contact_name)
+        if c is not None and c.id is not None:
+            ctx.deps.link_contact_ort(c.id, ort.id)
+    if project_title:
+        p = ctx.deps.get_or_create_project(project_title)
+        if p.id is not None:
+            ctx.deps.link_project_ort(p.id, ort.id)
+    return f"Örtlichkeit gespeichert: {ort.name} (ID {ort.id})"
+
+
+@agent.tool
 def update_project_status(
     ctx: RunContext[Repository],
     project_title: str,
@@ -437,6 +480,7 @@ def _rebuild_from_repo(repo: Repository, clarification: str | None = None) -> Ex
     """
     all_contacts = repo.get_all_contacts()
     all_projects = repo.get_all_projects()
+    all_orte = repo.get_all_orte()
     open_tasks = repo.query_open_items()
 
     project_by_id = {p.id: p for p in all_projects if p.id is not None}
@@ -476,10 +520,24 @@ def _rebuild_from_repo(repo: Repository, clarification: str | None = None) -> Ex
         if p.status != ProjectStatus.ANFRAGE or p.phase_note or p.next_action or p.waiting_on
     ]
 
+    contact_name_by_ort_id = {c.ort_id: c.name for c in all_contacts if c.ort_id is not None}
+    project_title_by_ort_id = {p.ort_id: p.title for p in all_projects if p.ort_id is not None}
+    extracted_locations = [
+        ExtractedOrt(
+            name=o.name,
+            adresse=o.adresse,
+            flurnummer=o.flurnummer,
+            contact=contact_name_by_ort_id.get(o.id) if o.id is not None else None,
+            project=project_title_by_ort_id.get(o.id) if o.id is not None else None,
+        )
+        for o in all_orte
+    ]
+
     return ExtractionResult(
         contacts=extracted_contacts,
         tasks=extracted_tasks,
         project_updates=extracted_updates,
+        locations=extracted_locations,
         clarification=clarification,
     )
 
@@ -537,6 +595,16 @@ def _format_result_for_prompt(result: ExtractionResult, *, mark_gaps: bool = Fal
     for ed in result.edits:
         changes = _format_edit_changes(ed)
         lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title} — {changes}")
+    for loc in result.locations:
+        details = [d for d in (loc.adresse, loc.flurnummer) if d]
+        detail = f" ({', '.join(details)})" if details else ""
+        refs = []
+        if loc.contact:
+            refs.append(f"Kontakt: {loc.contact}")
+        if loc.project:
+            refs.append(f"Projekt: {loc.project}")
+        ref = f" [{', '.join(refs)}]" if refs else ""
+        lines.append(f"  - Örtlichkeit: {loc.name}{detail}{ref}")
     if lines:
         return "\n".join(lines)
     return "  (nichts erkannt)" if mark_gaps else "  (leer)"
@@ -646,8 +714,9 @@ def run_gap_check(
         f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
         f"Erster Extraktions-Vorschlag:\n{first_formatted}\n\n"
         "Prüfe den Vorschlag sorgfältig gegen das Transkript und ergänze ihn:\n"
-        "1. Übersehen: Wurde eine Aufgabe, ein Kontakt, ein Projekt-Update oder eine "
-        "Erledigung im Transkript genannt, fehlt aber im Vorschlag? Trage sie nach.\n"
+        "1. Übersehen: Wurde eine Aufgabe, ein Kontakt, ein Projekt-Update, eine "
+        "Örtlichkeit oder eine Erledigung im Transkript genannt, fehlt aber im "
+        "Vorschlag? Trage sie nach.\n"
         "2. Fälligkeit: Legt der Text ein Timing nahe (»vor dem Termin«, »diese Woche«, "
         "»bald«, ein Wochentag, ein konkretes Datum), fehlt aber bei einer Aufgabe das "
         "Datum? Leite ein konkretes ISO-Datum (YYYY-MM-DD) ab.\n"

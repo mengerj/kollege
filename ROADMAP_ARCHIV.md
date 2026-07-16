@@ -896,3 +896,80 @@ Auswahl verwirren könnte).
   im Vorschlag *und* Namensnennung in der ✅-Bestätigung; bestehendes Projekt →
   keine Markierung, unveränderte Zählung.
 - ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 369 Tests).
+
+---
+
+### Schritt 8.26 — Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) ✅
+
+**Motiv.** Landschaftsarchitektur arbeitet ortsbezogen (Grundstücke,
+Flurstücke, Baustellen). Neben Kontakt/Projekt/Aufgabe sollte eine vierte
+Entität **Örtlichkeit** erfasst werden können: `name` (Pflicht), `adresse` und
+`flurnummer` (optional), verknüpfbar mit Kontakten und Projekten.
+
+**Umgesetzt.**
+- **Datenmodell** ([`models.py`](src/kollege/models.py)): `Ort` (DB-Modell:
+  `id`, `name`, `adresse`, `flurnummer`, `created_at`, `updated_at`) +
+  `ExtractedOrt` (LLM-Schema: `name`, `adresse`, `flurnummer`, plus `contact`/
+  `project` zur Namensauflösung wie bei `ExtractedTask`) + `locations`-Feld in
+  `ExtractionResult` (zählt in `is_empty()` mit). Verknüpfung wie in der
+  Roadmap vorgezeichnet: `Project.ort_id`/`Contact.ort_id` (je höchstens ein
+  Ort), kein n:m.
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)): neue
+  `orte`-Tabelle (exact-name-Dedup wie Kontakte); `get_or_create_ort`,
+  `get_ort_by_name`/`get_ort_by_id`, `list_orte` (alphabetisch, `/orte`),
+  `get_all_orte` (Bekannte-Namen-Kontext), `link_contact_ort`/
+  `link_project_ort`, `delete_ort` (löst Zuordnung in Kontakten/Projekten,
+  kein Cascade — wie `delete_contact`). **Schema-Migration**: `_DDL_CONTACTS`/
+  `_DDL_PROJECTS` bekommen `ort_id` für frische DBs; `_migrate_ort_columns`
+  prüft `PRAGMA table_info` und fährt `ALTER TABLE … ADD COLUMN` nach, falls
+  die Spalte auf einer bestehenden DB-Datei noch fehlt (SQLite kennt kein
+  `ADD COLUMN IF NOT EXISTS`). `reset_all` räumt jetzt auch `orte` leer.
+- **Extraktion** ([`agent/__init__.py`](src/kollege/agent/__init__.py)):
+  neues Tool `link_ort` (Namens-Dedup + optionale Kontakt-/Projekt-
+  Verknüpfung — Projekt wird bei Bedarf angelegt wie bei `create_task`,
+  Kontakt nur bei bereits bestehendem Kontakt aufgelöst). System-Prompt und
+  Lücken-Prüfungs-Prompt (`run_gap_check`) erwähnen Örtlichkeiten.
+  `filter_known_names`/`build_known_names_context`/`get_known_names_context`
+  auf eine Drei-Wege-Aufteilung (Kontakte/Projekte/Orte, je `max_names // 3`)
+  umgestellt — **Breaking Change** an `filter_known_names`s Rückgabetyp
+  (2-Tuple → 3-Tuple), bewusst in Kauf genommen; `build_known_names_context`
+  bleibt rückwärtskompatibel (`ort_names` optional). `_format_result_for_prompt`
+  zeigt Örtlichkeiten inkl. Adresse/Flurnummer/Kontakt-/Projekt-Referenz —
+  sonst gälte für Revisions-/Lücken-Prüfungs-Läufe dieselbe Verlust-Gefahr wie
+  bei Erledigungen/Änderungen vor dem 8.20-Fix. `_rebuild_from_repo`
+  (Fallback-Pfad für kleinere Modelle ohne `final_result`-Tool) rekonstruiert
+  Örtlichkeiten inkl. Kontakt-/Projekt-Referenz aus dem DB-Zustand.
+- **Oberfläche** ([`orchestrator.py`](src/kollege/orchestrator.py)): neue
+  `📍 Örtlichkeit: …`-Zeile in `_result_items` inkl. Neu-Markierung (analog
+  8.25, jetzt auch für referenzierte Orte *und* über Örtlichkeiten referenzierte
+  neue Projekte); `dedupe_result` dedupliziert Örtlichkeiten nach Namen;
+  `persist_result` legt Örtlichkeiten an und verknüpft sie (nach Kontakten/
+  Projekten, damit eine Verknüpfung auf einen im selben Vorschlag neu
+  angelegten Kontakt/Projekt greift); `format_orte` + Kommando `/orte`;
+  `/loeschen ort <id>` mit Bestätigung (gleicher Zwei-Schritt-Flow wie
+  Kontakt/Projekt/Aufgabe); `/zuruecksetzen`-Vorschau und `reset_all` zählen
+  Örtlichkeiten mit; `/hilfe` aktualisiert.
+- **Qualität**: zwei neue Eval-Fixtures
+  ([`06_garten_hinterberger_flurstueck.json`](tests/fixtures/eval/06_garten_hinterberger_flurstueck.json),
+  [`07_streuobstwiese_berger_ohne_adresse.json`](tests/fixtures/eval/07_streuobstwiese_berger_ohne_adresse.json)
+  — mit/ohne Adresse+Flurnummer, Projekt- bzw. Kontaktverknüpfung);
+  `ExtractionExpectation`/`score_result` um `min_locations`/`max_locations`/
+  `location_names` ergänzt (gleiches deklaratives Muster wie bestehende
+  Felder); `runner.py` unverändert kompatibel (kennt nur `FixtureScore`).
+
+**Bewusst nicht im Scope.** Geokodierung/Karten; Stufe-B-Bearbeitung von Orten
+(Umbenennen/Merge, wie bei Kontakten erst bei realem Bedarf); n:m-Verknüpfungen
+(FK reicht für ein Projekt/einen Kontakt an höchstens einem Ort).
+
+**DoD.** ✅
+- ✅ E2E-Test (gemockte `run_extraction`): Sprachnotiz mit Ort (Adresse +
+  Flurnummer + neue Projektverknüpfung) → Vorschlag mit „— neu"-Markierung →
+  Bestätigung → Ort und verknüpftes Projekt landen korrekt in der DB.
+- ✅ Ort↔Projekt- und Ort↔Kontakt-Verknüpfung wird extrahiert (`link_ort`-Tool,
+  `persist_result`) und ist via `/orte` abfragbar.
+- ✅ Löschung mit Bestätigung (`/loeschen ort <id>`) funktioniert, referentielle
+  Regel wie bei Kontakten (Zuordnung lösen, kein Cascade).
+- ✅ Migrationstest: bestehende DB-Datei ohne `ort_id`-Spalte öffnet und
+  funktioniert nach dem Upgrade weiter (idempotent bei erneutem Öffnen).
+- ✅ Eval-Fixtures ergänzt (2 neue, CI-Modus grün).
+- ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 414 Tests).

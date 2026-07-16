@@ -1,0 +1,10 @@
+{
+  "id": "garten_hinterberger_flurstueck",
+  "description": "Örtlichkeit mit Adresse, Flurnummer und Projektverknüpfung (Schritt 8.26)",
+  "transcript": "Neue Baustelle: Garten Hinterberger in der Seestraße 7, Flurnummer 118. Gehört zum Projekt Uferweg Neubau.",
+  "expected": {
+    "min_locations": 1,
+    "location_names": ["Hinterberger"],
+    "must_not_be_empty": true
+  }
+}

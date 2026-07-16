@@ -63,10 +63,12 @@ from kollege.models import (
     Contact,
     ExtractedCompletion,
     ExtractedContact,
+    ExtractedOrt,
     ExtractedProjectUpdate,
     ExtractedTask,
     ExtractedTaskEdit,
     ExtractionResult,
+    Ort,
     Project,
     Task,
     TaskSource,
@@ -85,6 +87,7 @@ __all__ = [
     "format_contacts",
     "format_date_de",
     "format_open_tasks",
+    "format_orte",
     "format_projects",
     "format_proposal",
     "persist_result",
@@ -134,6 +137,7 @@ _Item = (
     | ExtractedProjectUpdate
     | ExtractedCompletion
     | ExtractedTaskEdit
+    | ExtractedOrt
 )
 
 # ---------------------------------------------------------------------------
@@ -187,19 +191,21 @@ _HELP_TEXT = (
     "/dringend — offene Aufgaben, überfällige zuerst\n"
     "/kontakte — alle Kontakte\n"
     "/projekte — alle Projekte\n"
+    "/orte — alle Örtlichkeiten\n"
     '/erledigt <id> — Aufgabe als erledigt markieren (z.B. "/erledigt 3")\n'
-    "/loeschen kontakt|projekt|aufgabe <id> — Eintrag löschen, mit Bestätigung "
+    "/loeschen kontakt|projekt|aufgabe|ort <id> — Eintrag löschen, mit Bestätigung "
     '(z.B. "/loeschen aufgabe 3")\n'
-    "/zuruecksetzen — ALLES löschen (Kontakte, Projekte, Aufgaben), mit Bestätigung\n"
+    "/zuruecksetzen — ALLES löschen (Kontakte, Projekte, Aufgaben, Örtlichkeiten), "
+    "mit Bestätigung\n"
     "/hilfe — diese Übersicht"
 )
 
-# "/loeschen kontakt|projekt|aufgabe <id>" (Schritt 8.22) — Groß-/Kleinschreibung
-# der Entität wie bei allen anderen Kommandos egal.
-_LOESCHEN_ARGS = re.compile(r"^(kontakt|projekt|aufgabe)\s+(\d+)$", re.IGNORECASE)
+# "/loeschen kontakt|projekt|aufgabe|ort <id>" (Schritt 8.22/8.26) — Groß-/
+# Kleinschreibung der Entität wie bei allen anderen Kommandos egal.
+_LOESCHEN_ARGS = re.compile(r"^(kontakt|projekt|aufgabe|ort)\s+(\d+)$", re.IGNORECASE)
 _LOESCHEN_USAGE = (
-    'Nutzung: "/loeschen kontakt <id>", "/loeschen projekt <id>" oder '
-    '"/loeschen aufgabe <id>" (z.B. "/loeschen aufgabe 3").'
+    'Nutzung: "/loeschen kontakt <id>", "/loeschen projekt <id>", '
+    '"/loeschen aufgabe <id>" oder "/loeschen ort <id>" (z.B. "/loeschen aufgabe 3").'
 )
 
 
@@ -244,6 +250,18 @@ def format_projects(projects: list[Project]) -> str:
     if not projects:
         return "Keine Projekte gespeichert."
     lines = [f"#{p.id} {p.title} [{p.status}]" for p in projects]
+    return "\n".join(lines)
+
+
+def format_orte(orte: list[Ort]) -> str:
+    """Örtlichkeiten als knappe, ID-beschriftete Liste — für ``/orte``."""
+    if not orte:
+        return "Keine Örtlichkeiten gespeichert."
+    lines = []
+    for o in orte:
+        details = [d for d in (o.adresse, o.flurnummer and f"Flur {o.flurnummer}") if d]
+        suffix = f" ({', '.join(details)})" if details else ""
+        lines.append(f"#{o.id} {o.name}{suffix}")
     return "\n".join(lines)
 
 
@@ -335,7 +353,7 @@ class PendingDeletion:
 
 
 def _unknown_project_names(result: ExtractionResult, repo: Repository) -> frozenset[str]:
-    """Projektnamen aus Aufgaben/Projekt-Updates, die noch nicht in der DB existieren.
+    """Projektnamen aus Aufgaben/Projekt-Updates/Örtlichkeiten, die noch nicht in der DB existieren.
 
     Nur für die Anzeige im Vorschlag (Schritt 8.25) — die Wahrheit entscheidet sich
     erst beim Persistieren (``persist_result.new_projects``), da zwischen Vorschlag
@@ -343,18 +361,32 @@ def _unknown_project_names(result: ExtractionResult, repo: Repository) -> frozen
     """
     names = {t.project for t in result.tasks if t.project}
     names |= {pu.project for pu in result.project_updates}
+    names |= {loc.project for loc in result.locations if loc.project}
     return frozenset(name for name in names if repo.get_project_by_title(name) is None)
 
 
+def _unknown_ort_names(result: ExtractionResult, repo: Repository) -> frozenset[str]:
+    """Ortsnamen aus Örtlichkeiten, die noch nicht in der DB existieren (Schritt 8.26).
+
+    Analog zu ``_unknown_project_names`` — reine Anzeige-Markierung ("— neu") im
+    Vorschlag, die Wahrheit entscheidet sich erst beim Persistieren.
+    """
+    names = {loc.name for loc in result.locations}
+    return frozenset(name for name in names if repo.get_ort_by_name(name) is None)
+
+
 def _result_items(
-    result: ExtractionResult, unknown_projects: frozenset[str] = frozenset()
+    result: ExtractionResult,
+    unknown_projects: frozenset[str] = frozenset(),
+    unknown_orte: frozenset[str] = frozenset(),
 ) -> list[tuple[str, _Item]]:
     """Alle extrahierten Elemente als (Label, Objekt)-Liste (stabile Reihenfolge).
 
     ``unknown_projects`` (Schritt 8.25): Projektnamen, die noch nicht in der DB
     existieren, werden im Label als "— neu" markiert — implizit über
     ``get_or_create_project`` angelegte Projekte sollen VOR der Bestätigung
-    sichtbar sein (Human-in-the-loop-Lücke, Designprinzip 3).
+    sichtbar sein (Human-in-the-loop-Lücke, Designprinzip 3). ``unknown_orte``
+    (Schritt 8.26): analoge Markierung für neue Örtlichkeiten.
     """
     items: list[tuple[str, _Item]] = []
     for c in result.contacts:
@@ -378,7 +410,26 @@ def _result_items(
         items.append((f"✅ Aufgabe schließen: #{comp.task_id} {comp.task_title}", comp))
     for ed in result.edits:
         items.append((f"✏️ Aufgabe ändern: #{ed.task_id} {ed.task_title} — {_edit_changes(ed)}", ed))
+    for loc in result.locations:
+        items.append((f"📍 Örtlichkeit: {_ort_label(loc, unknown_orte, unknown_projects)}", loc))
     return items
+
+
+def _ort_label(
+    loc: ExtractedOrt, unknown_orte: frozenset[str], unknown_projects: frozenset[str]
+) -> str:
+    """Anzeigeform einer extrahierten Örtlichkeit inkl. Neu-Markierung (Schritt 8.26)."""
+    marker = " — neu" if loc.name in unknown_orte else ""
+    details = [d for d in (loc.adresse, loc.flurnummer and f"Flur {loc.flurnummer}") if d]
+    detail_str = f" ({', '.join(details)})" if details else ""
+    refs = []
+    if loc.contact:
+        refs.append(f"Kontakt: {loc.contact}")
+    if loc.project:
+        proj_marker = " — neu" if loc.project in unknown_projects else ""
+        refs.append(f"Projekt: {loc.project}{proj_marker}")
+    ref_str = f" [{', '.join(refs)}]" if refs else ""
+    return f"{loc.name}{marker}{detail_str}{ref_str}"
 
 
 def _edit_changes(ed: ExtractedTaskEdit) -> str:
@@ -418,6 +469,7 @@ def dedupe_result(result: ExtractionResult) -> ExtractionResult:
     - Kontakte: gleich bei identischem Namen.
     - Aufgaben: gleich bei identischem Titel **und** gleicher Frist (``due``).
     - Projekt-Updates: gleich bei identischem Projektnamen.
+    - Örtlichkeiten: gleich bei identischem Namen.
 
     Reine Wertkopie — das übergebene ``result`` bleibt unverändert.
     """
@@ -459,12 +511,21 @@ def dedupe_result(result: ExtractionResult) -> ExtractionResult:
             seen_edits.add(ed.task_id)
             edits.append(ed)
 
+    seen_locations: set[str] = set()
+    locations: list[ExtractedOrt] = []
+    for loc in result.locations:
+        lkey = _norm(loc.name)
+        if lkey not in seen_locations:
+            seen_locations.add(lkey)
+            locations.append(loc)
+
     return ExtractionResult(
         contacts=contacts,
         tasks=tasks,
         project_updates=updates,
         completed=completions,
         edits=edits,
+        locations=locations,
         clarification=result.clarification,
     )
 
@@ -487,7 +548,8 @@ def format_proposal(result: ExtractionResult, repo: Repository | None = None) ->
     Markierung.
     """
     unknown_projects = _unknown_project_names(result, repo) if repo is not None else frozenset()
-    items = _result_items(result, unknown_projects)
+    unknown_orte = _unknown_ort_names(result, repo) if repo is not None else frozenset()
+    items = _result_items(result, unknown_projects, unknown_orte)
     lines: list[str] = ["Ich habe folgendes erkannt:\n"]
     if len(items) == 1:
         label, _ = items[0]
@@ -568,6 +630,7 @@ def persist_result(
     updates_to_save: list[ExtractedProjectUpdate] = []
     completions_to_save: list[ExtractedCompletion] = []
     edits_to_save: list[ExtractedTaskEdit] = []
+    locations_to_save: list[ExtractedOrt] = []
 
     for i, (_, obj) in enumerate(items):
         if i not in selected:
@@ -582,6 +645,8 @@ def persist_result(
             completions_to_save.append(obj)
         elif isinstance(obj, ExtractedTaskEdit):
             edits_to_save.append(obj)
+        elif isinstance(obj, ExtractedOrt):
+            locations_to_save.append(obj)
 
     count = 0
     new_projects: list[str] = []
@@ -677,6 +742,29 @@ def persist_result(
             if edit_project is not None and edit_project.markdown_log_path is not None:
                 log = open_project_log(edit_project, log_dir)
                 log.append_entry(_format_task_edit_entry(ed), source="Sprachnotiz")
+        count += 1
+
+    # 6. Örtlichkeiten (Schritt 8.26) — nach Kontakten/Projekten, damit eine
+    # Verknüpfung auf einen im selben Vorschlag neu angelegten Kontakt/Projekt
+    # greift. Kontakt-Verknüpfung nur bei bereits existierendem Kontakt (wie bei
+    # Aufgaben, ``et.contact``); Projekt wird bei Bedarf angelegt (wie ``et.project``).
+    for loc in locations_to_save:
+        if loc.project and repo.get_project_by_title(loc.project) is None:
+            new_projects.append(loc.project)
+        ort = repo.get_or_create_ort(loc.name, adresse=loc.adresse, flurnummer=loc.flurnummer)
+        assert ort.id is not None
+        if loc.contact:
+            c = repo.get_contact_by_name(loc.contact)
+            if c is not None and c.id is not None:
+                repo.link_contact_ort(c.id, ort.id)
+        if loc.project:
+            p = repo.get_or_create_project(loc.project)
+            had_log = p.markdown_log_path is not None
+            log = open_project_log(p, log_dir)
+            if not had_log:
+                repo.update_project(p)
+            assert p.id is not None
+            repo.link_project_ort(p.id, ort.id)
         count += 1
 
     return PersistSummary(count=count, new_projects=new_projects)
@@ -855,12 +943,13 @@ class Orchestrator:
 
         logger.info(
             "Extraktion: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s), "
-            "%d Erledigung(en), %d Änderung(en)",
+            "%d Erledigung(en), %d Änderung(en), %d Örtlichkeit(en)",
             len(result.contacts),
             len(result.tasks),
             len(result.project_updates),
             len(result.completed),
             len(result.edits),
+            len(result.locations),
         )
 
         proposal = PendingProposal(
@@ -975,6 +1064,8 @@ class Orchestrator:
             self._channel.send(sender, format_contacts(self._repo.list_contacts()))
         elif cmd == "projekte":
             self._channel.send(sender, format_projects(self._repo.list_projects()))
+        elif cmd == "orte":
+            self._channel.send(sender, format_orte(self._repo.list_orte()))
         elif cmd == "erledigt":
             self._handle_erledigt(sender, args)
         elif cmd == "loeschen":
@@ -1002,7 +1093,7 @@ class Orchestrator:
         self._channel.send(sender, f'✅ Aufgabe #{task.id} "{task.title}" erledigt.')
 
     def _handle_loeschen(self, sender: str, args: str, run_id: str) -> None:
-        """ "/loeschen kontakt|projekt|aufgabe <id>": Löschung vorschlagen (Schritt 8.22).
+        """ "/loeschen kontakt|projekt|aufgabe|ort <id>": Löschung vorschlagen (Schritt 8.22/8.26).
 
         Destruktiv → nie sofort ausführen. Zeigt zuerst eine Vorschau (Name/Titel,
         bei einem Projekt inkl. Anzahl mitgelöschter Aufgaben — Cascade, siehe
@@ -1032,12 +1123,18 @@ class Orchestrator:
             task_count = len(self._repo.get_tasks_by_project(target_id))
             extra = f" inkl. {task_count} Aufgabe(n)" if task_count else ""
             label = f'Projekt #{project.id} "{project.title}"{extra}'
-        else:  # "aufgabe"
+        elif kind == "aufgabe":
             task = self._repo.get_task_by_id(target_id)
             if task is None:
                 self._channel.send(sender, f"Keine Aufgabe mit ID {target_id} gefunden.")
                 return
             label = f'Aufgabe #{task.id} "{task.title}"'
+        else:  # "ort"
+            ort = self._repo.get_ort_by_id(target_id)
+            if ort is None:
+                self._channel.send(sender, f"Keine Örtlichkeit mit ID {target_id} gefunden.")
+                return
+            label = f'Örtlichkeit #{ort.id} "{ort.name}"'
 
         self._pending.pop(sender, None)
         self._pending_clarifications.pop(sender, None)
@@ -1061,10 +1158,14 @@ class Orchestrator:
         contacts = self._repo.get_all_contacts()
         projects = self._repo.get_all_projects()
         tasks = self._repo.get_all_tasks()
-        if not contacts and not projects and not tasks:
+        orte = self._repo.get_all_orte()
+        if not contacts and not projects and not tasks and not orte:
             self._channel.send(sender, "Es ist nichts gespeichert, das gelöscht werden könnte.")
             return
-        label = f"{len(contacts)} Kontakt(e), {len(projects)} Projekt(e), {len(tasks)} Aufgabe(n)"
+        label = (
+            f"{len(contacts)} Kontakt(e), {len(projects)} Projekt(e), "
+            f"{len(tasks)} Aufgabe(n), {len(orte)} Örtlichkeit(en)"
+        )
         self._pending.pop(sender, None)
         self._pending_clarifications.pop(sender, None)
         self._pending_deletions[sender] = PendingDeletion(
@@ -1097,6 +1198,9 @@ class Orchestrator:
             elif pending.action == "aufgabe":
                 assert pending.target_id is not None
                 self._repo.delete_task(pending.target_id)
+            elif pending.action == "ort":
+                assert pending.target_id is not None
+                self._repo.delete_ort(pending.target_id)
             else:
                 self._repo.reset_all()
         except ValueError:
@@ -1342,12 +1446,13 @@ class Orchestrator:
         self._pending[sender] = proposal
         logger.info(
             "Rückfrage-Antwort: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s), "
-            "%d Erledigung(en), %d Änderung(en)",
+            "%d Erledigung(en), %d Änderung(en), %d Örtlichkeit(en)",
             len(result.contacts),
             len(result.tasks),
             len(result.project_updates),
             len(result.completed),
             len(result.edits),
+            len(result.locations),
         )
 
     def _revise(self, sender: str, msg: IncomingMessage, run_id: str) -> None:
@@ -1434,10 +1539,11 @@ class Orchestrator:
         self._pending[sender] = new_proposal
         logger.info(
             "Korrektur-Lauf: %d Kontakt(e), %d Aufgabe(n), %d Projekt-Update(s), "
-            "%d Erledigung(en), %d Änderung(en)",
+            "%d Erledigung(en), %d Änderung(en), %d Örtlichkeit(en)",
             len(revised.contacts),
             len(revised.tasks),
             len(revised.project_updates),
             len(revised.completed),
             len(revised.edits),
+            len(revised.locations),
         )
