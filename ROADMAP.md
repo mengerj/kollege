@@ -12,12 +12,22 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen)** (siehe
-Details/DoD weiter unten). Automatisch anschließbar (keine Live-Nutzerin nötig,
-Messung über den bestehenden 8.11-Benchmark). Danach, sobald wieder live getestet
-wird: **Schritt 8.5** (restliche Live-Edge-Cases) mit der neuen Observability
-(8.21), inkl. Validierung von 8.18/8.19/8.20 und dem neuen 8.22-Lösch-Flow live.
-Danach: Stufe B für **Kontakte** (Umbenennung + Merge).
+**Schritt 8.24 — Testphase-Vorbereitung: Datenschutz-Quick-Wins** (siehe
+Details/DoD weiter unten).
+
+**Kontext: Testphase mit der Nutzerin steht an.** Der Bot wird als Linked Device
+an *ihrem* Signal-Konto verknüpft (QR-Scan), Host bleibt vorerst der Laptop,
+Modell bleibt `mistral-medium-3.1`. Dafür zuerst die Datenschutz-Quick-Wins
+(8.24), dann die drei Testphasen-Features in dieser Reihenfolge:
+**8.25** (neue Projekte sichtbar) → **8.26** (Örtlichkeit als vierte Entität) →
+**8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
+
+**Schritt 8.23** (Token-Sparen) bleibt offen und ist weiterhin jederzeit
+**automatisch** anschließbar (keine Live-Nutzerin nötig, Messung über den
+8.11-Benchmark) — er blockiert die Testphase nicht. Sobald live getestet wird:
+**Schritt 8.5** (restliche Live-Edge-Cases) mit der neuen Observability (8.21),
+inkl. Validierung von 8.18/8.19/8.20 und dem 8.22-Lösch-Flow live. Danach:
+Stufe B für **Kontakte** (Umbenennung + Merge).
 
 > **DSGVO-konforme EU-LLM-Anbindung** ist nach **Schritt 9.1** verschoben (Phase 2)
 > — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb.
@@ -66,7 +76,11 @@ Danach: Stufe B für **Kontakte** (Umbenennung + Merge).
 | 8.20 | Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix) | 1.5 | ✅ erledigt |
 | 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
 | 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
-| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ▶ nächster Schritt |
+| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ⬜ offen (automatisch anschließbar) |
+| 8.24 | Testphase-Vorbereitung: Datenschutz-Quick-Wins | 1.5 | ▶ nächster Schritt |
+| 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ⬜ offen |
+| 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ⬜ offen |
+| 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 9.1 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 2 | 🅿️ verschoben (war 8.12) |
 | 10 | Task-Extraktion aus E-Mail + CommunicationLog | 2 | ⬜ offen |
@@ -176,6 +190,164 @@ Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
 Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
 doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
 Regression; CI-Kette grün.
+
+### Schritt 8.24 — Testphase-Vorbereitung: Datenschutz-Quick-Wins ⬜
+
+**Motiv.** Erste echte Testphase mit der Nutzerin: Bot als Linked Device an
+**ihrem** Signal-Konto, Host ist der Laptop des Entwicklers, Modell bleibt
+`mistral-medium-3.1`. Bevor echte Personendaten fließen, die **einfachen**
+Datenschutz-Hebel ziehen (Designprinzip 5) — die große Anbieter-Evaluierung
+bleibt in **9.1**, hier nur der Minimal-Vorgriff.
+
+**Ansatz.**
+- **LLM-Anbindung bleibt in der Testphase bewusst OpenRouter →
+  `mistral-medium-3.1`** (Entscheidung Nutzer 2026-07-16: direkter
+  Mistral-Account erfordert separates Guthaben — Aufwand/Nutzen für die
+  Testphase nicht gerechtfertigt). Datenlage laut Policy: **kein Training**
+  auf Prompts, Aufbewahrung bis **30 Tage (anonymisiert)**; das Modell läuft
+  bei Mistral (EU/Frankreich), das **Routing** aber über OpenRouter
+  (US-Intermediär). Das ist eine bewusste, **in der Einwilligung offengelegte**
+  Abweichung vom EU-only-Ziel — Behebung bleibt in **9.1**. Im Schritt:
+  Policy-Aussagen verifizieren und OpenRouter-Account-Einstellungen härten
+  (Logging-Opt-out, ggf. Provider-Pinning auf Mistral, damit Anfragen nicht
+  bei einem anderen Host des Modells landen).
+- **Tracing bleibt AN — aber mit informierter Einwilligung** (Entscheidung
+  Nutzer 2026-07-16): Ohne Traces ist Verbessern im Blindflug; statt sie
+  abzuschalten wird die Nutzerin transparent informiert und willigt schriftlich
+  ein (Monitoring während der 2-wöchigen Testphase, Löschzusage danach,
+  Migrations-Ausnahme bei Fortsetzung). Dokument liegt vor:
+  `docs/privat/Einwilligung_Testphase.md` (gitignored) — dort ist auch die
+  OpenRouter-Vermittlung offengelegt, inkl. Hinweis, dass künftige Versionen
+  strengeren Datenschutz bekommen (direkte EU-Anbindung + AVV, siehe 9.1).
+- **Log-Hygiene:** `kollege.log` und Konsolen-Logging auf personenbezogene
+  Volltexte prüfen (Transkript-Volltext raus oder auf DEBUG-Level absenken);
+  Aufbewahrung/Löschung alter Traces und Logs kurz regeln — konsistent mit der
+  Löschzusage aus der Einwilligung (spätestens 2 Wochen nach Testphasen-Ende
+  alles löschen; manuelles Lösch-Skript oder dokumentierte Regel reicht).
+- **Onboarding-Checkliste für die Nutzerin** (kurzes Doc in `docs/`):
+  QR-Verknüpfung Schritt für Schritt (Token läuft nach wenigen Minuten ab →
+  **gemeinsam live** machen, QR nicht per Mail/Chat vorab verschicken),
+  KI-Transparenz-Hinweis (was der Bot ist, was gespeichert wird, wo),
+  Einwilligung unterschreiben lassen (siehe oben), Host-Laptop: FileVault
+  aktiv, Bildschirmsperre. Hinweis dokumentieren, dass als Linked Device
+  technisch **alle** Nachrichten ihres Kontos am Laptop ankommen, der Bot aber
+  nur Note-to-Self verarbeitet und Fremd-`dataMessage` verwirft (Verhalten aus
+  8.5, siehe [live-testing-guide.md](docs/live-testing-guide.md)
+  §Stolpersteine).
+
+**Bewusst nicht im Scope.** Weitere Anbieter; Trace-Anonymisierung (Einsicht
+ist durch die Einwilligung gedeckt, Löschfrist geregelt).
+
+**DoD.** OpenRouter-Datenschutz-Einstellungen gesetzt und dokumentiert
+(Logging-Opt-out, Provider-Pinning geprüft); Policy-Aussagen (kein Training,
+30-Tage-Retention anonymisiert) verifiziert und in der Einwilligung korrekt
+abgebildet; keine Personendaten-Volltexte auf INFO-Level in `kollege.log`;
+Retention-Regel für Logs/Traces konsistent zur Löschzusage notiert;
+Onboarding-/Datenschutz-Checkliste in `docs/` vorhanden; CI-Kette grün.
+
+### Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar ⬜
+
+**Motiv (Live-Beobachtung Nutzer).** Legt eine Aufgabe implizit ein neues
+Projekt an (`get_or_create_project` in
+[`persist_result`](src/kollege/orchestrator.py)), taucht das weder im Vorschlag
+noch in der Bestätigung auf — gezählt und angezeigt werden nur die
+`_result_items` (Kontakte/Aufgaben/Projekt-Updates/…). Die Nutzerin erfährt
+nicht, dass ein Projekt entstanden ist → Human-in-the-loop-Lücke
+(Designprinzip 3): sie bestätigt etwas, dessen Nebeneffekt sie nicht sieht.
+
+**Ansatz.**
+- Beim Bauen des Vorschlags prüfen, welche `task.project`-Namen (und
+  `project_updates`-Namen) **noch nicht** in der DB existieren → im
+  Aufgaben-Label kennzeichnen (z. B. `📋 Aufgabe: … [Projekt „X" — neu]`) oder
+  als eigene Zeile `📁 Neues Projekt: X` aufführen.
+- `persist_result` gibt statt der nackten Zahl ein kleines Ergebnis-Objekt
+  zurück (z. B. Anzahl je Typ + Liste neu angelegter Projekte); die
+  ✅-Bestätigung nennt neue Projekte explizit
+  („✅ 2 Aufgaben gespeichert, neues Projekt „X" angelegt.").
+- Race beachten: zwischen Vorschlag und Bestätigung kann das Projekt
+  anderweitig entstehen — die Wahrheit entscheidet sich beim Persistieren.
+
+**DoD.** Test: Notiz mit Aufgabe in unbekanntem Projekt → Vorschlag markiert das
+Projekt als neu, Bestätigungs-Nachricht nennt es; bestehendes Projekt → keine
+Neu-Markierung; Zählung in der Bestätigung weiterhin korrekt. CI-Kette grün.
+
+### Schritt 8.26 — Vierte Entität: „Örtlichkeit" (Name/Adresse/Flurnummer) ⬜
+
+**Motiv.** Landschaftsarchitektur arbeitet ortsbezogen (Grundstücke,
+Flurstücke, Baustellen). Neben Kontakt/Projekt/Aufgabe soll eine vierte
+Entität **Örtlichkeit** erfasst werden: `name` (Pflicht), `adresse` und
+`flurnummer` (optional), verknüpfbar mit **Kontakten und Projekten**.
+
+**Ansatz.**
+- **Datenmodell** ([`models.py`](src/kollege/models.py)): `Ort` (DB-Modell) +
+  `ExtractedOrt` (LLM-Schema) + Feld in `ExtractionResult`. Verknüpfung —
+  Entscheidung im Schritt, Startpunkt einfachst tragfähig: `Project.ort_id`
+  (ein Projekt spielt an höchstens einem Ort) und `Contact`↔`Ort` analog;
+  n:m-Tabelle nur, wenn der Bedarf real wird. Deutscher Domänenbegriff
+  (`ort`/`oertlichkeit`) wie üblich beibehalten.
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)):
+  CRUD + `get_or_create_ort` + Namensabgleich; Lösch-Referenzregel wie bei
+  Kontakten (Zuordnung lösen → `NULL`, **kein** Cascade). Bestehende DB:
+  Schema-Migration bedenken (neue Tabelle + Spalten auf Bestand).
+- **Extraktion** ([`agent/__init__.py`](src/kollege/agent/__init__.py)):
+  System-Prompt um Örtlichkeiten erweitern; `[BEKANNTE NAMEN]`-Kontext um Orte
+  ergänzen (8.7-Mechanik). **Achtung Token-Budget:** neuer Kontextblock
+  vergrößert jeden Prompt — im Blick behalten, das ist das 8.23-Motiv.
+- **Oberfläche:** 📍-Zeile in [`_result_items`](src/kollege/orchestrator.py)
+  (inkl. Neu-Markierung aus 8.25), `/orte`-Query-Command,
+  `/loeschen ort <id>` mit Bestätigung, `/hilfe` aktualisieren.
+- **Qualität:** Eval-Fixtures (8.10) um Ort-Fälle ergänzen (mit/ohne Adresse,
+  Flurnummer, Verknüpfung zu Projekt/Kontakt); Benchmark-Kompatibilität prüfen.
+
+**Bewusst nicht im Scope.** Geokodierung/Karten; Stufe-B-Bearbeitung von Orten
+(erst wie bei Kontakten Bedarf abwarten); n:m-Verknüpfungen, falls FK reicht.
+
+**DoD.** E2E: Sprachnotiz mit Ort (+ Adresse/Flurnummer) → Vorschlag →
+Bestätigung → DB; Ort↔Projekt und Ort↔Kontakt-Verknüpfung wird extrahiert und
+ist via `/orte` abfragbar; Löschung mit Bestätigung funktioniert; bestehende DB
+läuft nach Migration weiter; Eval-Fixtures ergänzt; CI-Kette grün.
+
+### Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan ⬜
+
+**Motiv.** Wert des Assistenten ist **rechtzeitiges Erinnern** (siehe „Grenzen
+& bewusste Auslassungen"). In der Testphase soll der Bot von sich aus melden —
+Vorgriff auf **Schritt 11** (der dann auf dieser Mechanik aufsetzt statt sie
+neu zu bauen). Zwei Nachrichtentypen:
+1. **Nachfrage-Ping:** kurze Erinnerung im Stil „Gibt es Neues? Sind Aufgaben
+   dazugekommen oder erledigt worden?" — lädt zur Sprachnotiz ein (Prinzip 1:
+   passive Erfassung braucht Anlässe).
+2. **Offene-Aufgaben-Liste:** schön formatierte Liste aller offenen Aufgaben
+   mit Bezug (Projekt, Kontakt, Örtlichkeit aus 8.26) und Fälligkeit, sinnvoll
+   sortiert (überfällig zuerst).
+
+**Zeitplan frei konfigurierbar.** Beispiel-Anforderung: Mo+Fr morgens *und*
+abends, Di–Do nur nachmittags — beliebig änderbar, ohne Code anzufassen.
+Vorschlag: Konfig-Datei (z. B. `data/reminders.toml`) mit Einträgen aus
+`typ` (ping | liste), Wochentagen und Uhrzeiten; Cron-Syntax nur, falls die
+einfache Form nicht reicht.
+
+**Ansatz.**
+- **Scheduler:** Entscheidung im Schritt — `APScheduler` (für Schritt 11
+  ohnehin geplant) oder schlanker eigener Ticker in `run_forever`
+  (Zeit-Check pro Poll-Schleife). Kriterium: Testbarkeit (Zeit mocken) und
+  keine Doppel-Sendung bei Neustart.
+- **Laptop-Realität:** Host schläft ggf. — verpasste Zeitpunkte bewusst
+  einfach behandeln (im Schritt festzurren: gar nicht nachholen oder max. den
+  jüngsten verpassten nachholen, nie stapeln).
+- **Versand** über den bestehenden Channel an `signal_number` (Note-to-Self,
+  wie alle Bot-Nachrichten). Erinnerung darf offene Pending-Zustände
+  (Vorschlag/Rückfrage/Löschung) **nicht** verwerfen oder stören.
+- Formatierung der Liste aus den bestehenden Query-Funktionen (8.15) ableiten.
+
+**Bewusst nicht im Scope.** Konfiguration per Chat-Command (Datei reicht in der
+Testphase); IMAP-Polling (Schritt 11); „intelligente" Auswahl, *welche* Aufgaben
+erinnert werden — es gehen schlicht alle offenen in die Liste.
+
+**DoD.** Zeitplan-Konfig-Datei mit Wochentag/Uhrzeit-Regeln je Nachrichtentyp,
+dokumentiert mit Beispiel; deterministische Tests für die Auslöse-Logik
+(gemockte Zeit, keine Doppel-Sendung, Neustart-sicher); Liste zeigt
+Projekt/Kontakt/Ort-Bezug + Fälligkeit; läuft im Dauerbetrieb
+(`scripts/run_signal.py`); CI-Kette grün.
 
 ---
 

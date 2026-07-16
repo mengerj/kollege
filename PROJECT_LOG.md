@@ -5,6 +5,56 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-16 — Roadmap-Planung Testphase (Doku-Session, keine Code-Änderung)
+
+**Auslöser.** Die Testphase mit der Nutzerin steht an: Bot wird als Linked
+Device an **ihrem** Signal-Konto verknüpft (QR-Scan, gemeinsam live wegen
+Token-Ablauf), Host bleibt der Laptop, Modell bleibt `mistral-medium-3.1`.
+
+**Neue Schritte in [ROADMAP.md](ROADMAP.md) (Details/DoD dort):**
+- **8.24 — Datenschutz-Quick-Wins:** Log-/Trace-Hygiene;
+  Onboarding-/Datenschutz-Checkliste für die Nutzerin; OpenRouter-Einstellungen
+  härten (LLM-Anbindung siehe 2. Nachtrag unten).
+- **8.25 — Neue Projekte sichtbar:** implizit via `get_or_create_project`
+  angelegte Projekte erscheinen bislang weder im Vorschlag noch in der
+  ✅-Bestätigung (Human-in-the-loop-Lücke, live aufgefallen).
+- **8.26 — Vierte Entität „Örtlichkeit":** Name/Adresse/Flurnummer, verknüpfbar
+  mit Kontakten und Projekten; volle Kette Modell→DB→Extraktion→Commands.
+- **8.27 — Proaktive Erinnerungen:** Nachfrage-Ping + formatierte
+  Offene-Aufgaben-Liste (mit Projekt/Kontakt/Ort-Bezug), Zeitplan frei
+  konfigurierbar per Datei (z. B. Mo+Fr morgens/abends, Di–Do nachmittags);
+  Vorgriff auf Schritt 11.
+
+**Entscheidungen.** Reihenfolge 8.24 → 8.25 → 8.26 → 8.27 (Datenschutz vor
+echten Daten, kleines Feature zuerst, Erinnerungen zuletzt, weil 8.27 die
+Ort-Bezüge aus 8.26 anzeigen soll). **8.23** (Token-Sparen) bleibt offen und
+jederzeit automatisch anschließbar — blockiert die Testphase nicht; nach 8.26
+wächst der Prompt-Kontext sogar, was 8.23 relevanter macht.
+
+**Nachtrag (gleiche Session):** Tracing wird in der Testphase **nicht**
+abgeschaltet, sondern per **informierter Einwilligung** der Nutzerin gedeckt
+(2 Wochen Monitoring, Löschzusage danach, Migrations-Ausnahme bei
+Fortsetzung). Einwilligungs-/Informationsdokument (deutsch) erstellt:
+`docs/privat/Einwilligung_Testphase.md` — Ordner `docs/privat/` ist
+**gitignored**. 8.24 entsprechend angepasst (Log-Hygiene bleibt, Trace-Aus
+gestrichen; DoD um DPA/Verifikation der Mistral-Aussagen ergänzt).
+
+**2. Nachtrag (gleiche Session):** LLM-Anbindung bleibt in der Testphase
+**bewusst OpenRouter → `mistral-medium-3.1`** (direkter Mistral-Account
+erfordert separates Guthaben; Aufwand/Nutzen nicht gerechtfertigt). Policy:
+kein Training, Prompts bis 30 Tage anonymisiert gespeichert; Modell läuft bei
+Mistral (EU), Routing über OpenRouter (US). In der Einwilligung **offen
+deklariert**, inkl. Hinweis auf strengeren Datenschutz in künftigen Versionen
+(direkte EU-Anbindung + AVV → 9.1). 8.24 entsprechend umgestellt („Mistral
+direkt" gestrichen, stattdessen OpenRouter-Härtung: Logging-Opt-out,
+Provider-Pinning).
+
+**Offene Punkte.** OpenRouter-Policy-Aussagen verifizieren + Account-
+Einstellungen härten (in 8.24); Ort-Verknüpfung FK vs. n:m wird in 8.26
+entschieden; Scheduler-Wahl (APScheduler vs. eigener Ticker) in 8.27.
+
+---
+
 ## 2026-07-03 — Schritt 8.22 — Löschen von Einträgen (Kontakte/Projekte/Aufgaben, automatische Session)
 
 **Auslöser.** Direkt aus dem Live-Test-Trace vom selben Tag (siehe Eintrag
