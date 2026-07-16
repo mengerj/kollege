@@ -12,30 +12,32 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar** (siehe
+**Schritt 8.26 — Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer)** (siehe
 Details/DoD weiter unten).
 
 **Kontext: Testphase mit der Nutzerin steht an.** Der Bot wird als Linked Device
 an *ihrem* Signal-Konto verknüpft (QR-Scan), Host bleibt vorerst der Laptop,
 Modell bleibt `mistral-medium-3.1` via OpenRouter. Die Nutzerin willigt in die
 Datenverarbeitung schriftlich ein (Dokument liegt in `docs/privat/`,
-gitignored). Die drei Testphasen-Features in dieser Reihenfolge:
-**8.25** (neue Projekte sichtbar) → **8.26** (Örtlichkeit als vierte Entität) →
-**8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
+gitignored). Die drei Testphasen-Features in dieser Reihenfolge: ~~8.25~~
+(neue Projekte sichtbar, erledigt) → **8.26** (Örtlichkeit als vierte Entität)
+→ **8.27** (proaktive Erinnerungen mit konfigurierbarem Zeitplan).
 
 **Schritt 8.23** (Token-Sparen) bleibt offen und ist weiterhin jederzeit
 **automatisch** anschließbar (keine Live-Nutzerin nötig, Messung über den
-8.11-Benchmark) — er blockiert die Testphase nicht. Sobald live getestet wird:
-**Schritt 8.5** (restliche Live-Edge-Cases) mit der neuen Observability (8.21),
-inkl. Validierung von 8.18/8.19/8.20 und dem 8.22-Lösch-Flow live. Danach:
-Stufe B für **Kontakte** (Umbenennung + Merge).
+8.11-Benchmark) — er blockiert die Testphase nicht; nach 8.26 wächst der
+Prompt-Kontext (neuer `[BEKANNTE NAMEN]`-Block für Orte) sogar weiter, was
+8.23 relevanter macht. Sobald live getestet wird: **Schritt 8.5** (restliche
+Live-Edge-Cases) mit der neuen Observability (8.21), inkl. Validierung von
+8.18/8.19/8.20 und dem 8.22-Lösch-Flow live. Danach: Stufe B für **Kontakte**
+(Umbenennung + Merge).
 
 > **DSGVO-konforme EU-LLM-Anbindung** ist nach **Schritt 9.1** verschoben (Phase 2)
 > — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb.
 
-*Zuletzt erledigt: 8.22 (Löschen von Einträgen). Was & warum steht im
-[PROJECT_LOG.md](PROJECT_LOG.md); die Detail-DoD im
-[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
+*Zuletzt erledigt: 8.25 (neue Projekte in Vorschlag & Bestätigung sichtbar,
+automatische Session). Was & warum steht im [PROJECT_LOG.md](PROJECT_LOG.md);
+die Detail-DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 
 > **Reihenfolge-Regel bestätigt (Nutzerin):** neue Nachricht = neue Notiz;
 > Korrektur/Antwort **nur** über die Zitat-Antwort-Funktion. Slash-Commands auf
@@ -78,8 +80,8 @@ Stufe B für **Kontakte** (Umbenennung + Merge).
 | 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
 | 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
 | 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ⬜ offen (automatisch anschließbar) |
-| 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ▶ nächster Schritt |
-| 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ⬜ offen |
+| 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ✅ erledigt |
+| 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ▶ nächster Schritt |
 | 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ⬜ offen |
 | 9 | IMAP read-only (t-online) | 2 | 🅿️ zurückgestellt bis Phase 1.5 (Branch liegt) |
 | 9.1 | DSGVO-konforme EU-LLM-Anbieter evaluieren & anbinden | 2 | 🅿️ verschoben (war 8.12) |
@@ -190,32 +192,6 @@ Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
 Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
 doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
 Regression; CI-Kette grün.
-
-### Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar ⬜
-
-**Motiv (Live-Beobachtung Nutzer).** Legt eine Aufgabe implizit ein neues
-Projekt an (`get_or_create_project` in
-[`persist_result`](src/kollege/orchestrator.py)), taucht das weder im Vorschlag
-noch in der Bestätigung auf — gezählt und angezeigt werden nur die
-`_result_items` (Kontakte/Aufgaben/Projekt-Updates/…). Die Nutzerin erfährt
-nicht, dass ein Projekt entstanden ist → Human-in-the-loop-Lücke
-(Designprinzip 3): sie bestätigt etwas, dessen Nebeneffekt sie nicht sieht.
-
-**Ansatz.**
-- Beim Bauen des Vorschlags prüfen, welche `task.project`-Namen (und
-  `project_updates`-Namen) **noch nicht** in der DB existieren → im
-  Aufgaben-Label kennzeichnen (z. B. `📋 Aufgabe: … [Projekt „X" — neu]`) oder
-  als eigene Zeile `📁 Neues Projekt: X` aufführen.
-- `persist_result` gibt statt der nackten Zahl ein kleines Ergebnis-Objekt
-  zurück (z. B. Anzahl je Typ + Liste neu angelegter Projekte); die
-  ✅-Bestätigung nennt neue Projekte explizit
-  („✅ 2 Aufgaben gespeichert, neues Projekt „X" angelegt.").
-- Race beachten: zwischen Vorschlag und Bestätigung kann das Projekt
-  anderweitig entstehen — die Wahrheit entscheidet sich beim Persistieren.
-
-**DoD.** Test: Notiz mit Aufgabe in unbekanntem Projekt → Vorschlag markiert das
-Projekt als neu, Bestätigungs-Nachricht nennt es; bestehendes Projekt → keine
-Neu-Markierung; Zählung in der Bestätigung weiterhin korrekt. CI-Kette grün.
 
 ### Schritt 8.26 — Vierte Entität: „Örtlichkeit" (Name/Adresse/Flurnummer) ⬜
 

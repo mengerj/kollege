@@ -186,6 +186,44 @@ def test_format_proposal_mentions_correction_via_quote_reply() -> None:
 
 
 # ---------------------------------------------------------------------------
+# format_proposal — Neue-Projekte-Markierung (Schritt 8.25)
+# ---------------------------------------------------------------------------
+
+
+def test_format_proposal_marks_unknown_project_as_new_on_task(repo: Repository) -> None:
+    result = ExtractionResult(
+        tasks=[ExtractedTask(title="Planung starten", project="Neuer Garten")]
+    )
+    text = format_proposal(result, repo)
+    assert "[Neuer Garten — neu]" in text
+
+
+def test_format_proposal_marks_unknown_project_as_new_on_update(repo: Repository) -> None:
+    result = ExtractionResult(
+        project_updates=[ExtractedProjectUpdate(project="Neuprojekt", status=ProjectStatus.PLANUNG)]
+    )
+    text = format_proposal(result, repo)
+    assert "📁 Projekt: Neuprojekt — neu" in text
+
+
+def test_format_proposal_does_not_mark_existing_project(repo: Repository) -> None:
+    repo.get_or_create_project("Bestehender Garten")
+    result = ExtractionResult(
+        tasks=[ExtractedTask(title="Nachpflege", project="Bestehender Garten")]
+    )
+    text = format_proposal(result, repo)
+    assert "[Bestehender Garten]" in text
+    assert "neu" not in text.lower()
+
+
+def test_format_proposal_without_repo_shows_no_marker() -> None:
+    """Ohne Repo-Argument (Rückwärtskompatibilität) entfällt die Neu-Markierung."""
+    result = ExtractionResult(tasks=[ExtractedTask(title="X", project="Irgendein Projekt")])
+    text = format_proposal(result)
+    assert "neu" not in text.lower()
+
+
+# ---------------------------------------------------------------------------
 # dedupe_result
 # ---------------------------------------------------------------------------
 
@@ -242,8 +280,8 @@ def test_dedupe_result_preserves_clarification_and_order() -> None:
 
 def test_persist_result_contact(repo: Repository, log_dir: Path) -> None:
     result = ExtractionResult(contacts=[ExtractedContact(name="Max Muster")])
-    count = persist_result(result, None, repo, log_dir)
-    assert count == 1
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 1
     assert repo.get_contact_by_name("Max Muster") is not None
 
 
@@ -252,8 +290,8 @@ def test_persist_result_task_resolves_contact(repo: Repository, log_dir: Path) -
         contacts=[ExtractedContact(name="Fam. Schulz")],
         tasks=[ExtractedTask(title="Besichtigung", contact="Fam. Schulz")],
     )
-    count = persist_result(result, None, repo, log_dir)
-    assert count == 2
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 2
     tasks = repo.query_open_items()
     assert len(tasks) == 1
     assert tasks[0].contact_id is not None
@@ -273,15 +311,15 @@ def test_persist_result_partial_selection(repo: Repository, log_dir: Path) -> No
         contacts=[ExtractedContact(name="Herr Bauer")],
         tasks=[ExtractedTask(title="Anruf vorbereiten")],
     )
-    count = persist_result(result, [0], repo, log_dir)
-    assert count == 1
+    summary = persist_result(result, [0], repo, log_dir)
+    assert summary.count == 1
     assert repo.get_contact_by_name("Herr Bauer") is not None
     assert repo.query_open_items() == []
 
 
 def test_persist_result_empty_returns_zero(repo: Repository, log_dir: Path) -> None:
-    count = persist_result(_result_empty(), None, repo, log_dir)
-    assert count == 0
+    summary = persist_result(_result_empty(), None, repo, log_dir)
+    assert summary.count == 0
 
 
 def test_persist_result_project_update_creates_log_file(repo: Repository, log_dir: Path) -> None:
@@ -337,6 +375,55 @@ def test_persist_result_appends_multiple_entries_to_same_log(
     content = log_files[0].read_text(encoding="utf-8")
     assert "Status: planung" in content
     assert "Neue Aufgabe: Zaun streichen" in content
+
+
+# ---------------------------------------------------------------------------
+# persist_result — PersistSummary.new_projects (Schritt 8.25)
+# ---------------------------------------------------------------------------
+
+
+def test_persist_result_summary_lists_new_project_from_task(
+    repo: Repository, log_dir: Path
+) -> None:
+    result = ExtractionResult(tasks=[ExtractedTask(title="Planung", project="Frischer Garten")])
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 1
+    assert summary.new_projects == ["Frischer Garten"]
+
+
+def test_persist_result_summary_lists_new_project_from_update(
+    repo: Repository, log_dir: Path
+) -> None:
+    result = ExtractionResult(
+        project_updates=[
+            ExtractedProjectUpdate(project="Frischer Park", status=ProjectStatus.PLANUNG)
+        ]
+    )
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.new_projects == ["Frischer Park"]
+
+
+def test_persist_result_summary_empty_for_existing_project(repo: Repository, log_dir: Path) -> None:
+    repo.get_or_create_project("Alter Garten")
+    result = ExtractionResult(tasks=[ExtractedTask(title="Pflege", project="Alter Garten")])
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 1
+    assert summary.new_projects == []
+
+
+def test_persist_result_summary_dedupes_same_new_project_across_tasks(
+    repo: Repository, log_dir: Path
+) -> None:
+    """Zwei Aufgaben im selben neuen Projekt → Projekt taucht nur einmal in new_projects auf."""
+    result = ExtractionResult(
+        tasks=[
+            ExtractedTask(title="Erste", project="Doppelt Neu"),
+            ExtractedTask(title="Zweite", project="Doppelt Neu"),
+        ]
+    )
+    summary = persist_result(result, None, repo, log_dir)
+    assert summary.count == 2
+    assert summary.new_projects == ["Doppelt Neu"]
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +594,52 @@ def test_confirm_ja_persists(orc: Orchestrator, channel: MemoryChannel, repo: Re
     assert SENDER not in orc._pending
     assert "✅" in channel.sent[0][1]
     assert len(repo.query_open_items()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Neue Projekte in Vorschlag & Bestätigung sichtbar (Schritt 8.25, E2E)
+# ---------------------------------------------------------------------------
+
+
+def test_new_project_marked_in_proposal_and_named_in_confirmation(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """DoD: Notiz mit Aufgabe in unbekanntem Projekt → Vorschlag markiert das Projekt
+    als neu, Bestätigungs-Nachricht nennt es explizit."""
+    result = ExtractionResult(
+        tasks=[ExtractedTask(title="Erstgespräch", project="Neuer Kundengarten")]
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=result):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Notiz"))
+    proposal_text = channel.sent[-1][1]
+    assert "Neuer Kundengarten — neu" in proposal_text
+
+    channel.sent.clear()
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+    confirm_text = channel.sent[0][1]
+    assert "✅" in confirm_text
+    assert "Neues Projekt angelegt" in confirm_text
+    assert '"Neuer Kundengarten"' in confirm_text
+    assert repo.get_project_by_title("Neuer Kundengarten") is not None
+
+
+def test_existing_project_not_marked_and_not_named_in_confirmation(
+    orc: Orchestrator, channel: MemoryChannel, repo: Repository
+) -> None:
+    """DoD: bestehendes Projekt → keine Neu-Markierung, Zählung bleibt korrekt."""
+    repo.get_or_create_project("Alter Kundengarten")
+    result = ExtractionResult(
+        tasks=[ExtractedTask(title="Nachpflege", project="Alter Kundengarten")]
+    )
+    with patch("kollege.orchestrator.run_extraction", return_value=result):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Notiz"))
+    proposal_text = channel.sent[-1][1]
+    assert "neu" not in proposal_text.lower()
+
+    channel.sent.clear()
+    orc.handle_message(IncomingMessage(sender=SENDER, text="ja"))
+    confirm_text = channel.sent[0][1]
+    assert confirm_text == "✅ 1 Eintrag/Einträge gespeichert."
 
 
 def test_confirm_thumbsup_persists(

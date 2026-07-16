@@ -5,6 +5,56 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-16 — Schritt 8.25 — Neue Projekte in Vorschlag & Bestätigung sichtbar (automatische Session)
+
+**Auslöser.** Live-Beobachtung: legt eine Aufgabe implizit ein neues Projekt
+an (`get_or_create_project` in `persist_result`), tauchte das weder im
+Vorschlag noch in der ✅-Bestätigung auf — eine Human-in-the-loop-Lücke
+(Designprinzip 3), da die Nutzerin einen Nebeneffekt bestätigte, den sie nicht
+sah. Details/Motiv/Designentscheidung siehe
+[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md#schritt-825--neue-projekte-in-vorschlag--bestätigung-sichtbar-).
+
+**Umsetzung.**
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)): neue
+  nicht-anlegende `get_project_by_title(title)`; `get_or_create_project` nutzt
+  sie intern (Konsistenz-Refactor).
+- **Vorschlag** ([`orchestrator.py`](src/kollege/orchestrator.py)):
+  `_unknown_project_names()` markiert unbekannte `task.project`-/
+  `project_updates.project`-Namen im Label als `[Name — neu]`. `format_proposal`
+  bekommt dafür ein optionales `repo`-Argument (ohne Repo keine Markierung,
+  Rückwärtskompatibilität zu bestehenden Formatierungstests).
+- **Persistenz:** `persist_result` gibt jetzt `PersistSummary` (`count` +
+  `new_projects: list[str]`) statt eines nackten `int` zurück. Vor jedem
+  `get_or_create_project`-Aufruf wird per `get_project_by_title` geprüft, ob
+  das Projekt schon existiert — das ist zugleich die Dedup-Logik (nach der
+  ersten Anlage findet der nächste Check dasselbe Projekt bereits). Bewusst
+  die einzige Stelle der Wahrheit: zwischen Vorschlag und Bestätigung kann ein
+  Projekt anderweitig entstehen (Race); der Vorschlag zeigt nur eine
+  Momentaufnahme.
+- **Bestätigung:** `_confirm` hängt bei nicht-leerer `new_projects`-Liste einen
+  Zusatzsatz an („✅ 1 Eintrag/Einträge gespeichert. Neues Projekt angelegt:
+  „Neuer Kundengarten".").
+- Inline-Markierung statt eigener `📁 Neues Projekt: X`-Zeile gewählt (beide
+  Varianten standen in der Roadmap zur Wahl) — bleibt 1:1 bei den bestehenden,
+  indexbasierten `_result_items`, keine zusätzliche nicht-auswählbare Zeile.
+
+**Tests.** Neu in [`test_db.py`](tests/test_db.py) (`get_project_by_title`),
+[`test_orchestrator.py`](tests/test_orchestrator.py) (`format_proposal`-Neu-
+Markierung mit/ohne Repo, `PersistSummary.new_projects` inkl. Dedup bei zwei
+Aufgaben im selben neuen Projekt, Orchestrator-E2E für neues vs. bestehendes
+Projekt). Bestehende `persist_result`-Aufrufstellen in `test_orchestrator.py`/
+`test_task_edits.py`/`test_completions.py` auf `summary.count` umgestellt
+(Breaking Change am Rückgabetyp, bewusst in Kauf genommen). 369 Tests grün
+(vorher 357 + 12 neue), `ruff`/`ruff format`/`mypy --strict` sauber.
+
+**Nächster Schritt.** Automatische Session (ohne Nutzerin) → **8.26**
+(Örtlichkeit als vierte Entität) als nächsten Schritt der Testphasen-Sequenz
+gesetzt (8.25 → 8.26 → 8.27, siehe Roadmap-Kontext). **8.23** bleibt weiterhin
+jederzeit automatisch anschließbar; **8.5** bleibt der Schritt für die nächste
+Live-Session mit der Nutzerin.
+
+---
+
 ## 2026-07-16 — Schritt 8.24 gestrichen (Doku, gleiche Session wie unten)
 
 **Entscheidung Nutzer.** Die Datenschutz-Quick-Wins (8.24) werden **nicht**
