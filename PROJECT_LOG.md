@@ -12,9 +12,9 @@ Device an **ihrem** Signal-Konto verknüpft (QR-Scan, gemeinsam live wegen
 Token-Ablauf), Host bleibt der Laptop, Modell bleibt `mistral-medium-3.1`.
 
 **Neue Schritte in [ROADMAP.md](ROADMAP.md) (Details/DoD dort):**
-- **8.24 — Datenschutz-Quick-Wins:** Mistral **direkt** (La Plateforme, EU)
-  statt über OpenRouter (US-Intermediär) — Minimal-Vorgriff auf 9.1;
-  Log-/Trace-Hygiene; Onboarding-/Datenschutz-Checkliste für die Nutzerin.
+- **8.24 — Datenschutz-Quick-Wins:** Log-/Trace-Hygiene;
+  Onboarding-/Datenschutz-Checkliste für die Nutzerin; OpenRouter-Einstellungen
+  härten (LLM-Anbindung siehe 2. Nachtrag unten).
 - **8.25 — Neue Projekte sichtbar:** implizit via `get_or_create_project`
   angelegte Projekte erscheinen bislang weder im Vorschlag noch in der
   ✅-Bestätigung (Human-in-the-loop-Lücke, live aufgefallen).
@@ -39,8 +39,18 @@ Fortsetzung). Einwilligungs-/Informationsdokument (deutsch) erstellt:
 **gitignored**. 8.24 entsprechend angepasst (Log-Hygiene bleibt, Trace-Aus
 gestrichen; DoD um DPA/Verifikation der Mistral-Aussagen ergänzt).
 
-**Offene Punkte.** DPA/AVV mit Mistral abschließen + Mistral-Aussagen in der
-Einwilligung verifizieren (in 8.24); Ort-Verknüpfung FK vs. n:m wird in 8.26
+**2. Nachtrag (gleiche Session):** LLM-Anbindung bleibt in der Testphase
+**bewusst OpenRouter → `mistral-medium-3.1`** (direkter Mistral-Account
+erfordert separates Guthaben; Aufwand/Nutzen nicht gerechtfertigt). Policy:
+kein Training, Prompts bis 30 Tage anonymisiert gespeichert; Modell läuft bei
+Mistral (EU), Routing über OpenRouter (US). In der Einwilligung **offen
+deklariert**, inkl. Hinweis auf strengeren Datenschutz in künftigen Versionen
+(direkte EU-Anbindung + AVV → 9.1). 8.24 entsprechend umgestellt („Mistral
+direkt" gestrichen, stattdessen OpenRouter-Härtung: Logging-Opt-out,
+Provider-Pinning).
+
+**Offene Punkte.** OpenRouter-Policy-Aussagen verifizieren + Account-
+Einstellungen härten (in 8.24); Ort-Verknüpfung FK vs. n:m wird in 8.26
 entschieden; Scheduler-Wahl (APScheduler vs. eigener Ticker) in 8.27.
 
 ---

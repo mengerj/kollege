@@ -200,21 +200,25 @@ Datenschutz-Hebel ziehen (Designprinzip 5) — die große Anbieter-Evaluierung
 bleibt in **9.1**, hier nur der Minimal-Vorgriff.
 
 **Ansatz.**
-- **US-Intermediär raus (größter Hebel, geringer Aufwand):**
-  [`build_model()`](src/kollege/agent/__init__.py) um einen direkten
-  **Mistral-La-Plateforme**-Provider erweitern (OpenAI-kompatible API, EU-Firma,
-  EU-Server, AVV möglich). Gleiches Modell wie bisher, nur ohne den Umweg über
-  OpenRouter (US-Intermediär, siehe 9.1-Landschaft). Key via `.env`
-  (`KOLLEGE_MISTRAL_API_KEY`). OpenRouter bleibt als Benchmark-Backend erhalten.
+- **LLM-Anbindung bleibt in der Testphase bewusst OpenRouter →
+  `mistral-medium-3.1`** (Entscheidung Nutzer 2026-07-16: direkter
+  Mistral-Account erfordert separates Guthaben — Aufwand/Nutzen für die
+  Testphase nicht gerechtfertigt). Datenlage laut Policy: **kein Training**
+  auf Prompts, Aufbewahrung bis **30 Tage (anonymisiert)**; das Modell läuft
+  bei Mistral (EU/Frankreich), das **Routing** aber über OpenRouter
+  (US-Intermediär). Das ist eine bewusste, **in der Einwilligung offengelegte**
+  Abweichung vom EU-only-Ziel — Behebung bleibt in **9.1**. Im Schritt:
+  Policy-Aussagen verifizieren und OpenRouter-Account-Einstellungen härten
+  (Logging-Opt-out, ggf. Provider-Pinning auf Mistral, damit Anfragen nicht
+  bei einem anderen Host des Modells landen).
 - **Tracing bleibt AN — aber mit informierter Einwilligung** (Entscheidung
   Nutzer 2026-07-16): Ohne Traces ist Verbessern im Blindflug; statt sie
   abzuschalten wird die Nutzerin transparent informiert und willigt schriftlich
   ein (Monitoring während der 2-wöchigen Testphase, Löschzusage danach,
   Migrations-Ausnahme bei Fortsetzung). Dokument liegt vor:
-  `docs/privat/Einwilligung_Testphase.md` (gitignored). Vor Übergabe: Mistral-
-  Datenverarbeitungs-Aussagen darin verifizieren (Privacy Policy/DPA
-  „La Plateforme": kein Training auf API-Daten, temporäre Speicherung/
-  Missbrauchskontrolle, EU-Hosting) und AVV/DPA im Mistral-Konto abschließen.
+  `docs/privat/Einwilligung_Testphase.md` (gitignored) — dort ist auch die
+  OpenRouter-Vermittlung offengelegt, inkl. Hinweis, dass künftige Versionen
+  strengeren Datenschutz bekommen (direkte EU-Anbindung + AVV, siehe 9.1).
 - **Log-Hygiene:** `kollege.log` und Konsolen-Logging auf personenbezogene
   Volltexte prüfen (Transkript-Volltext raus oder auf DEBUG-Level absenken);
   Aufbewahrung/Löschung alter Traces und Logs kurz regeln — konsistent mit der
@@ -234,9 +238,10 @@ bleibt in **9.1**, hier nur der Minimal-Vorgriff.
 **Bewusst nicht im Scope.** Weitere Anbieter; Trace-Anonymisierung (Einsicht
 ist durch die Einwilligung gedeckt, Löschfrist geregelt).
 
-**DoD.** Produktivbetrieb läuft mit Mistral direkt (OpenRouter nur noch fürs
-Benchmarking); Mistral-Aussagen in der Einwilligung verifiziert + DPA/AVV
-abgeschlossen; keine Personendaten-Volltexte auf INFO-Level in `kollege.log`;
+**DoD.** OpenRouter-Datenschutz-Einstellungen gesetzt und dokumentiert
+(Logging-Opt-out, Provider-Pinning geprüft); Policy-Aussagen (kein Training,
+30-Tage-Retention anonymisiert) verifiziert und in der Einwilligung korrekt
+abgebildet; keine Personendaten-Volltexte auf INFO-Level in `kollege.log`;
 Retention-Regel für Logs/Traces konsistent zur Löschzusage notiert;
 Onboarding-/Datenschutz-Checkliste in `docs/` vorhanden; CI-Kette grün.
 
