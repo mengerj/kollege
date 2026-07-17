@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date
 
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
@@ -22,6 +23,7 @@ from kollege.agent import _SYSTEM_PROMPT, agent, build_model
 from kollege.config import LLMProvider, Settings
 from kollege.db import Repository
 from kollege.models import (
+    ExtractedCompletion,
     ExtractionResult,
     Task,
     TaskSource,
@@ -363,6 +365,74 @@ def test_run_gap_check_builds_prompt() -> None:
     assert kwargs.get("open_tasks_context") == "[OFFENE AUFGABEN] #1 Zaun streichen"
 
 
+def test_run_gap_check_compacts_completed_and_edit_refs_when_open_tasks_present() -> None:
+    """Schritt 8.23: Ist ``open_tasks_context`` gesetzt (Titel bereits dort sichtbar),
+    referenziert der Gap-Check-Prompt Erledigungen/Änderungen nur noch per ID, statt
+    den vollen Aufgaben-Titel ein zweites Mal aufzulisten (Kontext-Redundanz)."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_gap_check
+    from kollege.models import ExtractedTaskEdit
+
+    captured: dict[str, object] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    first = ExtractionResult(
+        completed=[ExtractedCompletion(task_id=3, task_title="Zaun bei Müller streichen")],
+        edits=[
+            ExtractedTaskEdit(
+                task_id=4, task_title="Angebot an Gemeinde Aßling", new_due=date(2026, 7, 10)
+            )
+        ],
+    )
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_gap_check(
+            original_transcript="Zaun ist fertig, Angebot bitte bis Freitag.",
+            first_result=first,
+            settings=Settings(),
+            open_tasks_context="[OFFENE AUFGABEN] #3 Zaun bei Müller streichen",
+        )
+
+    prompt = captured["prompt"]
+    assert isinstance(prompt, str)
+    assert "#3" in prompt
+    assert "#4" in prompt
+    assert "Zaun bei Müller streichen" not in prompt  # Titel nicht doppelt
+    assert "Angebot an Gemeinde Aßling" not in prompt
+    assert "Frist → 2026-07-10" in prompt  # tatsächliche Änderung bleibt sichtbar
+
+
+def test_run_gap_check_keeps_full_titles_without_open_tasks_context() -> None:
+    """Ohne ``open_tasks_context`` bleibt der volle Titel erhalten (kein Informations-
+    verlust, falls der Aufrufer die offenen Aufgaben nicht mitschickt)."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_gap_check
+
+    captured: dict[str, object] = {}
+
+    def _capture(transcript: str, *args: object, **kwargs: object) -> ExtractionResult:
+        captured["prompt"] = transcript
+        return ExtractionResult()
+
+    first = ExtractionResult(
+        completed=[ExtractedCompletion(task_id=3, task_title="Zaun bei Müller streichen")]
+    )
+    with patch("kollege.agent.run_extraction", side_effect=_capture):
+        run_gap_check(
+            original_transcript="Zaun ist fertig.",
+            first_result=first,
+            settings=Settings(),
+        )
+
+    prompt = captured["prompt"]
+    assert isinstance(prompt, str)
+    assert "Zaun bei Müller streichen" in prompt
+
+
 # --------------------------------------------------------------------------- #
 # history — vollständige Interaktions-Historie (Schritt 8.14)                  #
 # --------------------------------------------------------------------------- #
@@ -680,6 +750,39 @@ def test_run_extraction_traces_primary_path_success() -> None:
     assert len(result_payload["messages"]) >= 2  # type: ignore[arg-type]
     assert "requests" in result_payload["usage"]  # type: ignore[operator]
     assert result_payload["output"]["tasks"][0]["title"] == "Testaufgabe"  # type: ignore[index]
+
+
+def test_run_extraction_trace_does_not_duplicate_prompt_in_messages() -> None:
+    """Schritt 8.23: Der volle Prompt-Text steht bereits in ``llm_run_start.prompt``
+    — die ``user-prompt``-Part in ``llm_run_result.messages`` darf ihn nicht noch
+    einmal Byte-für-Byte enthalten (Trace-Datei wuchs sonst mit doppeltem Text)."""
+    from unittest.mock import patch
+
+    from kollege.agent import run_extraction
+    from kollege.models import ExtractedTask
+
+    def fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        result = ExtractionResult(tasks=[ExtractedTask(title="Testaufgabe")])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args=result.model_dump_json())]
+        )
+
+    writer = _RecordingTraceWriter()
+    repo = _repo()
+    prompt_text = "Ein längeres Test-Transkript, das im Trace nicht doppelt stehen soll."
+    with patch("kollege.agent.build_model", return_value=FunctionModel(fn)):
+        run_extraction(prompt_text, repo, Settings(), trace=writer, run_id="rid-dedup")
+
+    events = {e: payload for e, _, payload in writer.events}
+    assert events["llm_run_start"]["prompt"] == prompt_text
+
+    messages = events["llm_run_result"]["messages"]
+    assert isinstance(messages, list)
+    user_prompt_parts = [
+        part for msg in messages for part in msg["parts"] if part["part_kind"] == "user-prompt"
+    ]
+    assert user_prompt_parts  # die Part existiert weiterhin (Struktur bleibt sichtbar) …
+    assert all(part["content"] != prompt_text for part in user_prompt_parts)  # … aber ohne Duplikat
 
 
 def test_run_extraction_traces_primary_error_then_fallback_result() -> None:

@@ -1323,9 +1323,11 @@ class Orchestrator:
         **Erster Durchgang** (``_extract_first_pass``): der bisherige One-Shot mit
         Retry bei transienten Fehlern. **Zweiter Durchgang** (``run_gap_check``):
         prüft das Erstergebnis gegen das Transkript, füllt Lücken (fehlende Frist/
-        Projektzuordnung) und trägt Übersehenes nach. Läuft immer — außer der erste
-        Durchgang stellt bereits eine Rückfrage (die hat Vorrang). Scheitert der
-        zweite Durchgang, wird das Erstergebnis genutzt (best-effort, kein Abbruch).
+        Projektzuordnung) und trägt Übersehenes nach. Läuft nur, wenn das
+        Erstergebnis überhaupt Kandidaten dafür hat (``has_gap_check_candidates``,
+        Schritt 8.23) — und nicht, wenn der erste Durchgang bereits eine Rückfrage
+        stellt (die hat Vorrang). Scheitert der zweite Durchgang, wird das
+        Erstergebnis genutzt (best-effort, kein Abbruch).
 
         Nur der Erst-Extraktionspfad ist zweistufig; Korrektur-/Rückfrage-Läufe
         (``run_revision``/``run_clarification_response``) sind bereits von der
@@ -1338,6 +1340,16 @@ class Orchestrator:
 
         # Rückfrage aus dem ersten Durchgang hat Vorrang — kein zweiter Lauf.
         if first.clarification:
+            return first
+
+        # Gap-Check gaten (Schritt 8.23): eine reine Erledigungs-/Änderungs-Notiz
+        # (nur completed/edits) hat für den Gap-Check nichts zu prüfen — ein
+        # Live-Trace zeigte hier ein byte-identisches Ergebnis bei vollem zweiten
+        # LLM-Call. Spart Latenz und Tokens ohne Qualitätsverlust.
+        if not first.has_gap_check_candidates():
+            self._trace.write(
+                "routing", run_id, {"entscheidung": "gap_check:übersprungen (keine Kandidaten)"}
+            )
             return first
 
         try:

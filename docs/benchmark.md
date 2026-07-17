@@ -186,7 +186,10 @@ uv run pytest -m eval --real-llm -s
 Optionen: `--suite extraction,revision` (Standard: beide), `--out <dir>`
 (Standard: `benchmarks/results/`), `--threshold` (Standard: 0.5, siehe unten),
 `--concurrency N` (Standard: 1 = seriell; parallelisiert die Wiederholungen pro
-Fixture — nur für Nicht-Ollama-Provider wirksam, siehe oben).
+Fixture — nur für Nicht-Ollama-Provider wirksam, siehe oben), `--two-pass`
+(Schritt 8.23: bezieht den gegateten Gap-Check-Durchgang mit ein — misst den
+echten Produktions-Pfad aus `Orchestrator._extract` statt nur der
+Erstextraktion; nur für `extraction` relevant, `revision` bleibt einstufig).
 
 ## Ergebnis-Interpretation
 
