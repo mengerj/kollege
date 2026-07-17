@@ -5,6 +5,10 @@ misst also, was live passiert, inklusive Primär-→Fallback-Verhalten. Läuft
 ``N``-mal pro Fixture (Standard 5), damit Flakiness sichtbar wird statt in
 einem einzelnen Glückstreffer zu verschwinden.
 
+``--two-pass`` (Schritt 8.23) bezieht den gegateten Gap-Check-Durchgang
+(``run_gap_check``) mit ein — misst also den vollständigen Zwei-Durchgang-Pfad
+aus ``Orchestrator._extract`` (Schritt 8.18/8.23) statt nur der Erstextraktion.
+
 Aufruf:
     uv run python scripts/benchmark_models.py \\
         --models ornith:9b,qwen2.5:7b-instruct \\
@@ -35,7 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from kollege.agent import build_known_names_context, run_extraction, run_revision
+from kollege.agent import build_known_names_context, run_extraction, run_gap_check, run_revision
 from kollege.config import LLMProvider, Settings
 from kollege.db import Repository
 from kollege.eval import (
@@ -81,9 +85,18 @@ def _bench_extraction(
     runs: int,
     threshold: float,
     max_workers: int,
+    two_pass: bool = False,
 ) -> FixtureAggregate:
+    """``two_pass=True`` (Schritt 8.23) spiegelt den echten Produktions-Pfad
+    (``Orchestrator._extract``) wider: Erstextraktion, dann — nur falls
+    ``has_gap_check_candidates()`` Kandidaten findet — der Gap-Check-Durchgang
+    (``run_gap_check``). Ohne dieses Flag (Default, Schritt 8.11-Verhalten
+    unverändert) misst der Benchmark nur die Erstextraktion allein."""
+
     def run_once() -> FixtureScore:
         result = run_extraction(fixture.transcript, _make_repo(), settings)
+        if two_pass and result.has_gap_check_candidates():
+            result = run_gap_check(fixture.transcript, result, settings)
         return score_result(result, fixture.expected)
 
     return run_fixture_n_times(
@@ -230,6 +243,14 @@ def main() -> None:
         "wird immer seriell gefahren (ein lokaler GPU-Server profitiert nicht von "
         "parallelen Anfragen, siehe docs/benchmark.md).",
     )
+    parser.add_argument(
+        "--two-pass",
+        action="store_true",
+        help="Extraktion inkl. gegatetem Gap-Check-Durchgang messen (Schritt 8.23) — "
+        "entspricht dem echten Produktions-Pfad (Orchestrator._extract). Ohne dieses "
+        "Flag (Standard) misst 'extraction' nur die Erstextraktion, wie seit 8.11. "
+        "Nur für die 'extraction'-Suite relevant, 'revision' bleibt einstufig.",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.out)
@@ -255,7 +276,9 @@ def main() -> None:
         results: dict[str, list[FixtureAggregate]] = {}
         if extraction_fixtures:
             results["extraction"] = [
-                _bench_extraction(f, settings, args.runs, args.threshold, max_workers)
+                _bench_extraction(
+                    f, settings, args.runs, args.threshold, max_workers, two_pass=args.two_pass
+                )
                 for f in extraction_fixtures
             ]
         if revision_fixtures:

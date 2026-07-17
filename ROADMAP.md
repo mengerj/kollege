@@ -12,9 +12,21 @@ ergänzen und unten **NÄCHSTER SCHRITT** aktualisieren.
 
 ## ▶ NÄCHSTER SCHRITT
 
-**Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen)**
+**Schritt 8.24 — Kontakt-Umbenennung mit Merge-Semantik (Stufe B)**
 (siehe Details/DoD weiter unten) — **automatisch anschließbar**, keine
-Live-Nutzerin nötig (Messung über den 8.11-Benchmark).
+Live-Nutzerin nötig (deterministisch testbar, wie 8.19 für Aufgaben).
+
+> ⚠️ **Vor der nächsten Live-Session prüfen:** Das produktive `.env` steht auf
+> `KOLLEGE_LLM_PROVIDER=openrouter` / `KOLLEGE_LLM_MODEL=mistralai/mistral-medium-3.1`.
+> Ein direkter Test am 2026-07-17 zeigte, dass OpenRouter **jede** Anfrage an
+> genau dieses Modell mit `404 „No endpoints available matching your guardrail
+> restrictions and data policy"` ablehnt (andere Modelle über denselben Key
+> funktionieren, z. B. `mistralai/mistral-small-3.2-24b-instruct`,
+> `openai/gpt-4o-mini`) — vermutlich eine Datenschutz-/Guardrail-Einstellung
+> unter https://openrouter.ai/settings/privacy, die inzwischen keinen Anbieter
+> für dieses Modell mehr zulässt. **Falls der Bot live läuft, ist die
+> Extraktion damit aktuell komplett aus** (jede Notiz scheitert). Task dafür
+> ausgelagert (siehe Chip „Fix OpenRouter block on mistral-medium-3.1").
 
 **Testphasen-Vorbereitung abgeschlossen.** Alle drei vorbereitenden Features
 sind erledigt: ~~8.25~~ (neue Projekte sichtbar) → ~~8.26~~ (Örtlichkeit als
@@ -26,15 +38,20 @@ Device an ihrem Signal-Konto, QR-Scan, Host vorerst der Laptop, Modell
 (restliche Live-Edge-Cases) mit der Observability aus 8.21 vorgesehen, inkl.
 Validierung von 8.18/8.19/8.20/8.22 und jetzt auch 8.26/8.27 live.
 
-**Bis dahin: Schritt 8.23** — seit 8.26 wächst der Prompt-Kontext (neuer
-`[BEKANNTE NAMEN]`-Block für Orte), was ihn zunehmend relevanter macht. Danach:
-Stufe B für **Kontakte** (Umbenennung + Merge).
+**Bis dahin: Schritt 8.24** — die zuletzt in 8.19 bewusst zurückgestellte
+Stufe B **für Kontakte** (Aufgaben-Teil war 8.19). Danach: **8.23 ist
+erledigt** (Token-Sparen im Gap-Check) — als Nächstes offen sind 8.8
+(Sofort-Quittung, Status in der Tabelle vs. Detail-Block widersprüchlich,
+siehe PROJECT_LOG 2026-07-03 — bewusst nicht automatisch geändert) oder
+weiteres Token-Sparen (Instruktions-Redundanz System-Prompt vs. Kontextblöcke,
+siehe [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md#schritt-823--kontext-deduplizierung--gap-check-gating-token-sparen-)
+„Bewusst nicht im Scope").
 
 > **DSGVO-konforme EU-LLM-Anbindung** ist nach **Schritt 9.1** verschoben (Phase 2)
-> — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb.
+> — aktuell nicht in naher Zukunft, `mistral-medium-3.1` trägt den Betrieb
+> (sofern der OpenRouter-Guardrail-Block oben behoben ist).
 
-*Zuletzt erledigt: 8.27 (proaktive Erinnerungen — Ping/Aufgabenliste nach
-konfigurierbarem Wochentag/Uhrzeit-Zeitplan, `data/reminders.toml`,
+*Zuletzt erledigt: 8.23 (Gap-Check-Gating + Kontext-/Trace-Deduplizierung,
 automatische Session). Was & warum steht im [PROJECT_LOG.md](PROJECT_LOG.md);
 die Detail-DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 
@@ -78,7 +95,8 @@ die Detail-DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md).*
 | 8.20 | Korrektur-Lauf: Erledigungen bleiben erhalten (Bugfix) | 1.5 | ✅ erledigt |
 | 8.21 | Live-Debugging-Observability (LLM-Traces + Verlaufs-Log) | 1.5 | ✅ erledigt |
 | 8.22 | Löschen von Einträgen (Kontakte/Projekte/Aufgaben) | 1.5 | ✅ erledigt |
-| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ▶ nächster Schritt |
+| 8.23 | Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) | 1.5 | ✅ erledigt |
+| 8.24 | Kontakt-Umbenennung mit Merge-Semantik (Stufe B) | 1.5 | ▶ nächster Schritt |
 | 8.25 | Neue Projekte in Vorschlag & Bestätigung sichtbar | 1.5 | ✅ erledigt |
 | 8.26 | Vierte Entität „Örtlichkeit" (Name/Adresse/Flurnummer) | 1.5 | ✅ erledigt |
 | 8.27 | Proaktive Erinnerungen mit konfigurierbarem Zeitplan | 1.5 | ✅ erledigt |
@@ -108,7 +126,7 @@ bestätigte Aufgaben/Kontakte zurück. Läuft komplett lokal auf dem Air.*
 
 ## Phase 1.5 — Verflüssigung des Sprachnotiz-Kerns *(vor Phase 2)*
 
-> **Erledigte Schritte dieser Phase** (8.6, 8.7, 8.9–8.11, 8.13–8.22, 8.25–8.27)
+> **Erledigte Schritte dieser Phase** (8.6, 8.7, 8.9–8.11, 8.13–8.23, 8.25–8.27)
 > stehen mit voller Begründung/DoD im [ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md);
 > hier nur noch die **offenen** Schritte.
 
@@ -131,66 +149,34 @@ eigentliche Vorschlag kommt. Optional: Hinweis bei ungewöhnlich langem Lauf.
 **DoD:** Jede eingehende Notiz wird binnen ~1 s quittiert; der Vorschlag folgt wie
 gehabt. Kein Doppel-Senden mehr aus Ungeduld.
 
-### Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (Token-Sparen) ⬜
+### Schritt 8.24 — Kontakt-Umbenennung mit Merge-Semantik (Stufe B) ⬜
 
-**Motiv (Trace-Analyse 2026-07-03).** Die neuen LLM-Traces machen sichtbar, wo
-Kontext doppelt gesendet wird und Tokens unnötig verbraucht werden. Beobachtungen
-aus `data/traces/2026-07-03.jsonl`:
+**Motiv.** Die in [8.6](ROADMAP_ARCHIV.md#schritt-86--korrektur-revisions-schleife-natürlichsprachig-)
+bewusst zurückgestellte **Stufe B** (Korrektur bereits persistierter Einträge)
+ist für **Aufgaben** in [8.19](ROADMAP_ARCHIV.md#schritt-819--bestehende-aufgaben-bearbeiten-stufe-b-nur-aufgaben-)
+umgesetzt — für **Kontakte** weiterhin offen: „Herr Schnitt heißt eigentlich
+Schmidt" auf einen *bereits gespeicherten* Kontakt trifft heute ins Leere, weil
+`upsert_contact` per Namens-Dedup nur exakte/neue Namen kennt und keine
+Umbenennung bestehender Einträge unterstützt.
 
-1. **Gap-Check verdoppelt den Prompt-Kontext.** Der zweite Durchgang
-   (`run_gap_check`) sendet den **kompletten** `[BEKANNTE NAMEN]`- **und**
-   `[OFFENE AUFGABEN]`-Block erneut (via `known_names_context`/`open_tasks_context`)
-   **und** listet im „Erster Extraktions-Vorschlag"-Teil dieselben Aufgaben mit
-   vollem Titel + Frist noch einmal auf. Im Trace: Extraktion 3107 → Gap-Check
-   **3662** Input-Tokens, und das Ergebnis war **identisch** (`output ==`). Für
-   *jede* Notiz läuft damit ein zweiter, teurer LLM-Call.
-2. **Doppelte Instruktionen.** Die `completed`/`edits`-Anweisung steht **einmal
-   ausführlich im System-Prompt** und **erneut kondensiert** im
-   `[OFFENE AUFGABEN]`-User-Block; die `clarification`-Anweisung steht im
-   System-Prompt, im `[BEKANNTE NAMEN]`-Block und im `[OFFENE AUFGABEN]`-Block.
-3. **Aufgaben-Titel als Volltext doppelt** im Gap-Check (Kontextblock + Vorschlag).
-4. **Gap-Check läuft bedingungslos bei *jeder* Notiz** (in
-   [`_extract`](src/kollege/orchestrator.py) direkt nach dem ersten Durchgang, nur
-   bei `first.clarification` übersprungen). Der zweite LLM-Call ist damit ein
-   **fester Verdopplungsfaktor** auf Latenz *und* Tokens der Erstextraktion —
-   unabhängig davon, ob es überhaupt Lücken zu füllen gibt. Im Trace war das
-   Ergebnis byte-identisch (`output ==`), d. h. der komplette zweite Call war reine
-   Verschwendung.
-5. **Trace-Format speichert den Prompt doppelt** (kein LLM-Token, aber Disk /
-   schnelleres Wachstum der Trace-Dateien): der Prompt-Text steht sowohl in
-   `llm_run_start.payload.prompt` als auch nochmal in
-   `llm_run_result.payload.messages` (dort als `user-prompt`-Part). Eines von
-   beiden reicht — z. B. in `llm_run_result` nur noch die *neuen* Nachrichten seit
-   `llm_run_start` ablegen oder den redundanten `prompt` in `llm_run_start` weglassen.
+**Ansatz (analog 8.19, dort als Vorlage lesen).** Neues Repository-`rename_contact`
+oder `update_contact` mit **Merge-Semantik**: zielt die Umbenennung auf einen
+bereits existierenden Namen (`upsert_contact("Schmidt")` gäbe es schon), müssen
+die beiden Einträge zusammengeführt werden (referenzierende Aufgaben/Projekte/
+Orte umhängen, keine verwaisten Fremdschlüssel) statt einen zweiten „Schmidt"
+anzulegen. Adressierung vermutlich über einen `[BEKANNTE KONTAKTE]`-Kontext mit
+IDs (wie `open_tasks_context` bei 8.19), damit das LLM den Ziel-Kontakt eindeutig
+referenzieren kann.
 
-**Ansatz (Umfang im Schritt festzurren, messen mit Traces vorher/nachher).**
-- **Gap-Check gaten statt immer laufen lassen:** zweiten Durchgang nur auslösen,
-  wenn das Erstergebnis **plausible Lücken** hat (z. B. Aufgabe ohne Datum/Projekt,
-  oder nicht-leeres Ergebnis) — bei einer reinen Erledigungs-Notiz wie im Trace
-  bringt er nichts. Alternativ/Minimal: Gap-Check nur, wenn `first`-Ergebnis nicht
-  leer ist (spart den ganzen zweiten Call bei „nichts erkannt"/reinen Erledigungen).
-- **Kontext im Gap-Check abspecken:** im „Erster Vorschlag" nur **IDs/Kurzform**
-  statt Volltitel wiederholen (die Titel stehen bereits im `[OFFENE AUFGABEN]`-
-  Block), oder den `[OFFENE AUFGABEN]`-Block im zweiten Durchgang weglassen, wenn
-  er im ersten schon war.
-- **Instruktionen entdoppeln:** eine Quelle der Wahrheit — Detailregeln im
-  System-Prompt, die Kontextblöcke nur noch **Daten** (Namen/Aufgabenliste) ohne
-  wiederholte Handlungsanweisung.
-- **Trace-Redundanz beheben** (Punkt 5) — kleiner, isolierter Cleanup in
-  [`trace.py`](src/kollege/trace.py)/[`agent/__init__.py`](src/kollege/agent/__init__.py);
-  Viewer [`scripts/show_trace.py`](scripts/show_trace.py) entsprechend anpassen.
+**Zu klären im Schritt.** Merge-Konflikte (beide Kontakte haben abweichende
+E-Mail/Typ — welcher gewinnt?); ob die Erkennung über den Revisions-Pfad
+(Zitat-Antwort) reicht oder auch aus einer frischen Notiz möglich sein soll;
+Log-Konsistenz (Merge-Vorgang nachvollziehbar in den Projekt-Logs vermerken).
 
-**Bewusst kein Blindflug.** Token-Sparen darf die in 8.11/8.18 gemessene Qualität
-nicht verschlechtern → **Benchmark (8.11) vor/nach** fahren (`pass_rate`,
-`empty_rate`, `over_extraction_rate`), damit klar ist, dass nur Redundanz
-wegfällt, keine Wirkung. Das Gap-Check-Gating ist der Punkt mit dem höchsten
-Risiko für die Qualität (8.18 war genau dafür da) → hier besonders sorgfältig messen.
-
-**DoD.** Gap-Check läuft nur noch bei tatsächlichem Bedarf (Gating getestet);
-Kontext-Redundanz im Gap-Check-/System-Prompt messbar reduziert (Trace-Vergleich
-Input-Tokens vorher/nachher dokumentiert); Trace speichert den Prompt nicht mehr
-doppelt (Viewer weiterhin funktionsfähig); Benchmark zeigt **keine** Qualitäts-
-Regression; CI-Kette grün.
+**DoD.** `FunctionModel`-Test: Umbenennungs-Notiz + Ziel-Kontakt eindeutig im
+Kontext → Merge/Rename korrekt; Repo-Test für Merge-Semantik (referenzierende
+Aufgaben/Projekte/Orte bleiben verknüpft, kein Datenverlust); Orchestrator-
+Integrationstest (Notiz → Vorschlag → Bestätigung → DB); CI-Kette grün.
 
 ---
 
