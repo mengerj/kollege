@@ -6,7 +6,7 @@ Alle Tests laufen gegen In-Memory-SQLite (:memory:) — kein Dateisystem nötig.
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -40,7 +40,7 @@ def test_schema_creates_tables(repo: Repository) -> None:
         r[0]
         for r in repo._conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    assert {"contacts", "projects", "tasks", "orte"}.issubset(tables)
+    assert {"contacts", "projects", "tasks", "orte", "reminder_state"}.issubset(tables)
 
 
 # --------------------------------------------------------------------------- #
@@ -614,6 +614,33 @@ def test_migration_adds_ort_id_to_existing_contacts_and_projects_tables() -> Non
     assert project.ort_id is None
     # Migration ist idempotent — erneutes Öffnen darf nicht scheitern.
     Repository(conn)
+
+
+# --------------------------------------------------------------------------- #
+# Reminder-Zeitplan (Schritt 8.27)                                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_get_reminder_last_sent_returns_none_when_unset(repo: Repository) -> None:
+    assert repo.get_reminder_last_sent("ping:Mo,Fr:08:00:00") is None
+
+
+def test_set_and_get_reminder_last_sent_round_trip(repo: Repository) -> None:
+    when = datetime(2026, 7, 13, 8, 0, 0)
+    repo.set_reminder_last_sent("ping:Mo,Fr:08:00:00", when)
+    assert repo.get_reminder_last_sent("ping:Mo,Fr:08:00:00") == when
+
+
+def test_set_reminder_last_sent_overwrites_previous_value(repo: Repository) -> None:
+    key = "liste:Mo,Fr:18:00:00"
+    repo.set_reminder_last_sent(key, datetime(2026, 7, 13, 18, 0, 0))
+    repo.set_reminder_last_sent(key, datetime(2026, 7, 17, 18, 0, 0))
+    assert repo.get_reminder_last_sent(key) == datetime(2026, 7, 17, 18, 0, 0)
+
+
+def test_reminder_last_sent_keys_are_independent(repo: Repository) -> None:
+    repo.set_reminder_last_sent("ping:Mo:08:00:00", datetime(2026, 7, 13, 8, 0, 0))
+    assert repo.get_reminder_last_sent("liste:Mo:18:00:00") is None
 
 
 # --------------------------------------------------------------------------- #

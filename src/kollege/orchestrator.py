@@ -34,6 +34,10 @@ destruktiven Lösch-Commands sind eine Ausnahme: sie legen selbst einen neuen
 Pending-Zustand an und verwerfen dafür einen etwaig offenen Vorschlag/eine
 offene Rückfrage desselben Absenders (Prinzip 3 — nie ohne Bestätigung löschen,
 aber auch nie zwei Bestätigungs-Dialoge gleichzeitig offen).
+
+``run_forever`` prüft nach jedem Poll-Zyklus zusätzlich ``check_reminders()``
+(Schritt 8.27): proaktive Ping-/Aufgabenlisten-Nachrichten nach einem in
+``reminders.toml`` konfigurierten Zeitplan, unabhängig vom Pending-State.
 """
 
 from __future__ import annotations
@@ -74,6 +78,7 @@ from kollege.models import (
     TaskSource,
     TaskStatus,
 )
+from kollege.reminders import ReminderRule, ReminderType, due_reminders, load_reminder_rules
 from kollege.trace import NoopTraceWriter, TraceWriter, new_run_id
 from kollege.transcription import Transcriber
 
@@ -90,6 +95,7 @@ __all__ = [
     "format_orte",
     "format_projects",
     "format_proposal",
+    "format_reminder_list",
     "persist_result",
 ]
 
@@ -264,6 +270,48 @@ def format_orte(orte: list[Ort]) -> str:
         lines.append(f"#{o.id} {o.name}{suffix}")
     return "\n".join(lines)
 
+
+def format_reminder_list(tasks: list[Task], repo: Repository) -> str:
+    """Formatierte Aufgaben-Liste für die "liste"-Erinnerung (Schritt 8.27).
+
+    Anders als ``format_open_tasks`` (knapp, für ``/offen``/``/dringend``) zeigt
+    diese Liste zu jeder Aufgabe auch Projekt-/Kontakt-/Örtlichkeit-Bezug — der
+    Sinn der proaktiven Erinnerung ist ja gerade, ohne Nachschlagen zu wissen,
+    worum es geht. ``tasks`` wird in der übergebenen Reihenfolge angezeigt; der
+    Aufrufer sortiert (``repo.query_open_tasks(sort_by_due=True)`` — überfällig
+    zuerst, wie in der Roadmap gefordert).
+    """
+    if not tasks:
+        return "📋 Keine offenen Aufgaben."
+    lines = ["📋 Offene Aufgaben:\n"]
+    for t in tasks:
+        due = f" — fällig: {format_date_de(t.due)}" if t.due else " — (kein Datum)"
+        project = repo.get_project_by_id(t.project_id) if t.project_id else None
+        contact = repo.get_contact_by_id(t.contact_id) if t.contact_id else None
+        refs = []
+        if project is not None:
+            refs.append(f"Projekt: {project.title}")
+        if contact is not None:
+            refs.append(f"Kontakt: {contact.name}")
+        ort_id = None
+        if project is not None and project.ort_id is not None:
+            ort_id = project.ort_id
+        elif contact is not None and contact.ort_id is not None:
+            ort_id = contact.ort_id
+        if ort_id is not None:
+            ort = repo.get_ort_by_id(ort_id)
+            if ort is not None:
+                refs.append(f"Ort: {ort.name}")
+        ref_str = f" [{', '.join(refs)}]" if refs else ""
+        lines.append(f"#{t.id} {t.title}{ref_str}{due}")
+    return "\n".join(lines)
+
+
+# Proaktive Nachfrage-Erinnerung (Schritt 8.27, Regeltyp "ping") — lädt zur
+# Sprachnotiz ein, ohne selbst Fragen zur Extraktion zu stellen.
+_REMINDER_PING_TEXT = (
+    "👋 Gibt es Neues? Sind Aufgaben dazugekommen oder erledigt worden? Einfach kurz einsprechen."
+)
 
 # Anzahl Versuche und Standard-Wartezeit (Sekunden) bei transienten Extraktionsfehlern.
 # Transient = Ollama/Whisper/Container kurzfristig nicht erreichbar.
@@ -1000,7 +1048,49 @@ class Orchestrator:
                 self.run_once()
             except Exception:
                 logger.exception("Fehler in der Empfangs-/Poll-Schleife — fahre fort")
+            try:
+                self.check_reminders()
+            except Exception:
+                logger.exception("Fehler bei der Erinnerungs-Prüfung — fahre fort")
             time.sleep(poll_interval)
+
+    def check_reminders(self, now: datetime | None = None) -> None:
+        """Fällige proaktive Erinnerungen versenden (Schritt 8.27).
+
+        Liest den Zeitplan bei **jedem** Aufruf frisch von der Konfig-Datei
+        (``settings.reminders_config_path``) — Änderungen wirken ohne Neustart.
+        Nutzt lokale Wanduhrzeit ohne Zeitzone: die Nutzerin denkt in "8 Uhr
+        morgens" auf ihrem eigenen Laptop, nicht in UTC (anders als die
+        übrigen, UTC-basierten Zeitstempel dieses Projekts). Der zuletzt
+        versendete Zeitpunkt je Regel steht im Repository (Neustart-sicher,
+        keine Doppel-Sendung). Berührt nie ``self._pending``/
+        ``self._pending_clarifications``/``self._pending_deletions`` — eine
+        Erinnerung ist immer nur eine zusätzliche Nachricht, nie ein neuer
+        Bestätigungs-Zustand.
+        """
+        if not self._settings.signal_number:
+            return
+        rules = load_reminder_rules(Path(self._settings.reminders_config_path))
+        if not rules:
+            return
+        moment = now if now is not None else datetime.now()
+        last_sent = {
+            rule.key(): sent
+            for rule in rules
+            if (sent := self._repo.get_reminder_last_sent(rule.key())) is not None
+        }
+        for rule, occurrence in due_reminders(rules, moment, last_sent):
+            text = self._render_reminder(rule)
+            logger.info("Erinnerung fällig (%s), sende an Nutzerin", rule.typ)
+            self._channel.send(self._settings.signal_number, text)
+            self._repo.set_reminder_last_sent(rule.key(), occurrence)
+
+    def _render_reminder(self, rule: ReminderRule) -> str:
+        """Nachrichtentext für eine fällige Erinnerungs-Regel erzeugen."""
+        if rule.typ == ReminderType.PING:
+            return _REMINDER_PING_TEXT
+        tasks = self._repo.query_open_tasks(sort_by_due=True)
+        return format_reminder_list(tasks, self._repo)
 
     # ---------------------------------------------------------------------- #
     # Interne Methoden                                                         #

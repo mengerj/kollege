@@ -155,6 +155,26 @@ uv run python scripts/show_trace.py --full            # Prompts/Inhalte ungekür
 rm -r data/traces
 ```
 
+### f) Proaktive Erinnerungen konfigurieren (Schritt 8.27)
+
+Der Bot meldet sich von sich aus nach einem frei konfigurierbaren Zeitplan —
+entweder mit einer kurzen Nachfrage („Gibt es Neues?") oder mit der formatierten
+Liste aller offenen Aufgaben (Projekt-/Kontakt-/Ort-Bezug, überfällige zuerst).
+
+**Einrichten:**
+
+```bash
+cp docs/reminders.example.toml data/reminders.toml
+# dann nach Bedarf anpassen — Wochentage/Uhrzeiten je Regel, siehe Kommentare
+# in der Datei. Wird bei jedem Poll-Zyklus neu gelesen, kein Neustart nötig.
+```
+
+Fehlt `data/reminders.toml`, werden schlicht keine Erinnerungen versendet.
+Der zuletzt gesendete Zeitpunkt je Regel steht im Repository — ein Neustart des
+Bots sendet keine bereits verschickte Erinnerung erneut. Schlief der Laptop
+über eine geplante Zeit hinweg, wird beim nächsten Poll höchstens die
+**jüngste** verpasste Instanz einer Regel nachgeholt, nie mehrere gestapelt.
+
 ---
 
 ## 4. Edge-Cases zum Live-Durchspielen

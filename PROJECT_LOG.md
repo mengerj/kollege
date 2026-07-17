@@ -5,6 +5,66 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-16 — Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan (automatische Session)
+
+**Auslöser.** Letzter Schritt der Testphasen-Sequenz (8.25 → 8.26 → 8.27,
+siehe Roadmap-Kontext) — automatische Session ohne Nutzerin, wie in der
+8.26-Session vorbereitet.
+
+**Umsetzung.**
+- **Neues Modul** ([`reminders.py`](src/kollege/reminders.py)): `ReminderRule`
+  (Pydantic-Modell: `typ` ping|liste, `wochentage`-Kürzel Mo…So, `uhrzeit`) +
+  `load_reminder_rules()` (stdlib `tomllib`, keine neue Dependency — fehlende
+  Konfig-Datei → leere Regelliste statt Fehler) + `due_reminders()` (reine,
+  zeitmockbare Logik). **Nachhol-Entscheidung** (Roadmap ließ offen): höchstens
+  die **jüngste** verpasste Instanz einer Regel wird nachgeholt (Lookback bis
+  8 Tage), nie mehrere gestapelt — robust gegen einen schlafenden Laptop.
+- **Scheduler-Entscheidung**: schlanker eigener Ticker statt `APScheduler` —
+  `Orchestrator.check_reminders()` läuft nach jedem `run_forever`-Poll-Zyklus
+  (eigenes Try/Except, kein Absturz-Risiko). `APScheduler` bleibt für Schritt 11
+  vorgemerkt (dort passt er besser zum IMAP-Polling).
+- **Zeitbasis bewusst lokale Wanduhrzeit** (naive `datetime`, kein UTC) — anders
+  als sonst im Projekt, aber hier passend: die Nutzerin denkt in „8 Uhr morgens"
+  auf ihrem eigenen Laptop (Single-User, Single-Host).
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)): neue
+  Tabelle `reminder_state(key, last_sent)` + `get_reminder_last_sent`/
+  `set_reminder_last_sent` — Neustart-Sicherheit über die DB (Quelle der
+  Wahrheit), bewusst **nicht** Teil von `reset_all` (Scheduler-Zustand, keine
+  Nutzerdaten).
+- **Config** ([`config.py`](src/kollege/config.py)): `reminders_config_path`
+  (Default `data/reminders.toml`, liegt unter dem gitignored `data/`) — daher
+  committetes Beispiel unter
+  [`docs/reminders.example.toml`](docs/reminders.example.toml).
+- **Orchestrator** ([`orchestrator.py`](src/kollege/orchestrator.py)):
+  `check_reminders(now=None)` liest die Konfig-Datei bei jedem Aufruf frisch
+  (Zeitplan-Änderung ohne Neustart wirksam), sendet über den bestehenden
+  Channel an `signal_number`, bricht früh ab ohne Nummer/Regeln, rührt
+  `_pending`/`_pending_clarifications`/`_pending_deletions` nirgends an. Neue
+  `format_reminder_list()` zeigt zu jeder Aufgabe Projekt-/Kontakt-/Ort-Bezug
+  (Ort via `Project.ort_id` bzw. `Contact.ort_id`) und Fälligkeit, sortiert
+  über `repo.query_open_tasks(sort_by_due=True)` (überfällig zuerst).
+- **Live-Betrieb** ([`scripts/run_signal.py`](scripts/run_signal.py)):
+  Start-Banner zeigt Erinnerungs-Konfig-Status (AN/AUS + Regel-Anzahl).
+- **Doku**: neuer Abschnitt §3f in
+  [`docs/live-testing-guide.md`](docs/live-testing-guide.md).
+
+Details/Motiv/Designentscheidungen siehe
+[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md#schritt-827--proaktive-erinnerungen-mit-konfigurierbarem-zeitplan-).
+
+**Tests.** 32 neue Tests über `test_reminders.py` (Regel-Parsing, Fällig-Logik
+inkl. Nachhol-/Kein-Stapeln-Fälle), `test_reminders_orchestrator.py`
+(Versand-Verdrahtung, Neustart-Sicherheit über ein zweites Repository-gebundenes
+Orchestrator-Objekt, `run_forever`-Aufruf-Verdrahtung, Pending-State bleibt
+unangetastet) und `test_db.py` (reminder_state-Persistenz). 446 Tests grün
+(vorher 414), `ruff`/`ruff format`/`mypy --strict` sauber.
+
+**Nächster Schritt.** Alle drei Testphasen-Features (8.25/8.26/8.27) sind
+erledigt. **8.23** (Token-Sparen) ist jetzt automatisch anschließbar dran —
+bleibt relevant durch den seit 8.26 wachsenden Prompt-Kontext. Die eigentliche
+Live-Testphase mit der Nutzerin bleibt **8.5**, sobald sie wieder Zeit hat.
+
+---
+
 ## 2026-07-16 — Schritt 8.26 — Vierte Entität „Örtlichkeit" (automatische Session)
 
 **Auslöser.** Nächster Schritt der Testphasen-Sequenz (8.25 → 8.26 → 8.27,

@@ -1,0 +1,29 @@
+# Beispiel-Zeitplan für proaktive Erinnerungen (Schritt 8.27).
+#
+# Kopieren nach data/kollege.db-Nachbarschaft: data/reminders.toml
+# (data/ ist gitignored — die echte Datei ist lokal, kein Teil des Repos).
+# Fehlt data/reminders.toml, werden schlicht keine Erinnerungen versendet.
+#
+# Jeder [[erinnerung]]-Block:
+#   typ        "ping"  — kurze Nachfrage, lädt zur Sprachnotiz ein
+#              "liste" — formatierte Liste aller offenen Aufgaben
+#   wochentage Kürzel aus Mo, Di, Mi, Do, Fr, Sa, So (Liste, mind. 1)
+#   uhrzeit    lokale Wanduhrzeit "HH:MM" (24h)
+#
+# Beliebig viele Blöcke, beliebig kombinierbar — kein Code-Änderung nötig.
+# Beispiel unten: Mo+Fr morgens und abends, Di–Do nur nachmittags.
+
+[[erinnerung]]
+typ = "ping"
+wochentage = ["Mo", "Fr"]
+uhrzeit = "08:00"
+
+[[erinnerung]]
+typ = "liste"
+wochentage = ["Mo", "Fr"]
+uhrzeit = "18:00"
+
+[[erinnerung]]
+typ = "ping"
+wochentage = ["Di", "Mi", "Do"]
+uhrzeit = "14:00"

@@ -973,3 +973,82 @@ Entität **Örtlichkeit** erfasst werden können: `name` (Pflicht), `adresse` un
   funktioniert nach dem Upgrade weiter (idempotent bei erneutem Öffnen).
 - ✅ Eval-Fixtures ergänzt (2 neue, CI-Modus grün).
 - ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 414 Tests).
+
+---
+
+### Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan ✅
+
+**Motiv.** Wert des Assistenten ist rechtzeitiges Erinnern (siehe „Grenzen &
+bewusste Auslassungen" in ROADMAP.md) — letzter der drei Testphasen-Features
+(8.25 → 8.26 → 8.27). Zwei Nachrichtentypen: kurzer Nachfrage-Ping („Gibt es
+Neues?") und formatierte Liste aller offenen Aufgaben, Zeitplan frei
+konfigurierbar (Wochentage + Uhrzeit je Regel) ohne Code anzufassen.
+
+**Umgesetzt.**
+- **Neues Modul** ([`reminders.py`](src/kollege/reminders.py)): `ReminderRule`
+  (Pydantic: `typ` (`ping`/`liste`), `wochentage` (Kürzel `Mo`…`So`), `uhrzeit`)
+  + `load_reminder_rules()` (stdlib `tomllib`, keine neue Dependency; fehlende
+  Datei → leere Regelliste, kein Fehler) + `due_reminders()` (reine Logik,
+  zeitmockbar). **Nachhol-Entscheidung** (Roadmap ließ offen: „gar nicht" vs.
+  „höchstens jüngste"): `due_reminders` holt je Regel **höchstens die jüngste**
+  verpasste Instanz nach (Suche bis zu 8 Tage zurück), nie mehrere gestapelt —
+  robust gegen einen schlafenden Laptop, ohne bei langer Downtime eine Flut
+  alter Erinnerungen nachzuliefern.
+- **Scheduler-Entscheidung:** schlanker eigener Ticker statt `APScheduler` —
+  `Orchestrator.check_reminders()` wird von `run_forever()` nach jedem
+  Poll-Zyklus aufgerufen. Kriterium aus der Roadmap (Testbarkeit/Zeit mocken,
+  keine Doppel-Sendung bei Neustart) war mit einer injizierbaren `now`-Zeit +
+  Repository-Persistenz einfacher zu erfüllen als mit einer zusätzlichen
+  Scheduler-Dependency; `APScheduler` bleibt für Schritt 11 vorgemerkt (dort
+  kommt IMAP-Polling dazu, das eher zu einem echten Scheduler passt).
+- **Zeitbasis bewusst lokale Wanduhrzeit** (naive `datetime`, keine TZ) statt
+  des sonst im Projekt üblichen UTC — die Nutzerin denkt in „8 Uhr morgens" auf
+  ihrem eigenen Laptop, nicht in UTC; eine TZ-Umrechnung wäre hier eher
+  Fehlerquelle als Nutzen (Single-User, Single-Host).
+- **Repository** ([`db/repository.py`](src/kollege/db/repository.py)): neue
+  Tabelle `reminder_state(key, last_sent)` + `get_reminder_last_sent`/
+  `set_reminder_last_sent` (Upsert) — Neustart-Sicherheit über die DB statt
+  eine zusätzliche State-Datei, konsistent mit „SQLite ist Quelle der
+  Wahrheit". Bewusst **nicht** Teil von `reset_all` (Scheduler-Zustand, keine
+  Nutzerdaten).
+- **Config** ([`config.py`](src/kollege/config.py)): `reminders_config_path`
+  (Default `data/reminders.toml` — liegt unter dem gitignored `data/`, daher
+  committetes Beispiel unter
+  [`docs/reminders.example.toml`](docs/reminders.example.toml) zum Kopieren).
+- **Orchestrator** ([`orchestrator.py`](src/kollege/orchestrator.py)):
+  `check_reminders(now=None)` lädt die Konfig-Datei bei **jedem** Aufruf frisch
+  (Zeitplan-Änderungen wirken ohne Neustart), liest/schreibt `last_sent` nur für
+  tatsächlich fällige Regeln, sendet über den bestehenden Channel an
+  `settings.signal_number` (Note-to-Self) und bricht früh ab, wenn
+  `signal_number` leer oder keine Regeln geladen sind. Rührt `self._pending`/
+  `self._pending_clarifications`/`self._pending_deletions` nirgends an — eine
+  Erinnerung ist immer nur eine zusätzliche Nachricht. Neue Formatierung
+  `format_reminder_list()` (anders als die knappe `format_open_tasks`) zeigt zu
+  jeder Aufgabe Projekt-/Kontakt-/Ort-Bezug (Ort via `Project.ort_id` bzw.
+  `Contact.ort_id`, Projekt hat Vorrang) und Fälligkeit; der Aufrufer sortiert
+  via `repo.query_open_tasks(sort_by_due=True)` (überfällig zuerst).
+  `run_forever()` ruft `check_reminders()` nach jedem `run_once()` auf, mit
+  eigenem Try/Except (ein Fehler in der Erinnerungs-Prüfung darf den
+  Dauerbetrieb nicht abbrechen — analog zur bestehenden Poll-Schleifen-Härtung).
+- **Live-Betrieb** ([`scripts/run_signal.py`](scripts/run_signal.py)):
+  Start-Banner zeigt an, ob eine Konfig-Datei gefunden wurde und wie viele
+  Regeln geladen sind.
+- **Doku:** neuer Abschnitt „f) Proaktive Erinnerungen konfigurieren" in
+  [`docs/live-testing-guide.md`](docs/live-testing-guide.md) (§3f).
+
+**Bewusst nicht im Scope.** Konfiguration per Chat-Command (Datei reicht in der
+Testphase); IMAP-Polling (Schritt 11, dort auch `APScheduler`); „intelligente"
+Auswahl, welche Aufgaben erinnert werden (schlicht alle offenen).
+
+**DoD.** ✅
+- ✅ Zeitplan-Konfig-Datei (`[[erinnerung]]`-Einträge, `typ`/`wochentage`/
+  `uhrzeit`) mit committetem Beispiel + Doku.
+- ✅ Deterministische Tests für die Auslöse-Logik (gemockte `now`, keine
+  Doppel-Sendung fürs selbe Vorkommen, Neustart-sicher via zweitem
+  Orchestrator auf demselben Repository, Nachhol-Logik "höchstens jüngste
+  verpasste Instanz").
+- ✅ Liste zeigt Projekt-/Kontakt-/Ort-Bezug + Fälligkeit (inkl. „(kein
+  Datum)").
+- ✅ Läuft im Dauerbetrieb (`run_forever` ruft `check_reminders` jeden Zyklus,
+  eigenes Fehler-Containment).
+- ✅ CI-Kette grün (`ruff`/`ruff format`/`mypy --strict`/`pytest`, 446 Tests).
