@@ -659,6 +659,36 @@ def test_second_pass_failure_falls_back_to_first_result(
     assert SENDER in orc._pending
 
 
+def test_pure_completion_note_skips_second_pass(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Gap-Check-Gating (Schritt 8.23): eine reine Erledigungs-Notiz (nur completed,
+    keine Aufgaben/Kontakte/Projekte/Orte) hat für den Gap-Check nichts zu prüfen —
+    der zweite Durchgang läuft nicht (spart Latenz/Tokens, siehe Live-Trace
+    2026-07-03 im ROADMAP.md)."""
+    from kollege.models import ExtractedCompletion
+
+    first = ExtractionResult(
+        completed=[ExtractedCompletion(task_id=1, task_title="Zaun streichen")]
+    )
+    with (
+        patch("kollege.orchestrator.run_extraction", return_value=first),
+        patch("kollege.orchestrator.run_gap_check") as gap,
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Zaun ist fertig gestrichen."))
+    gap.assert_not_called()
+    assert SENDER in orc._pending
+
+
+def test_note_with_task_still_runs_second_pass(orc: Orchestrator, channel: MemoryChannel) -> None:
+    """Gegenprobe zum Gating: Enthält das Erstergebnis eine Aufgabe, läuft der
+    Gap-Check weiterhin (ist ein Kandidat für Lücken)."""
+    with (
+        patch("kollege.orchestrator.run_extraction", return_value=_result_task()),
+        patch("kollege.orchestrator.run_gap_check", return_value=_result_task()) as gap,
+    ):
+        orc.handle_message(IncomingMessage(sender=SENDER, text="Ruf bei Müller an"))
+    gap.assert_called_once()
+
+
 def test_handle_audio_uses_transcriber(
     repo: Repository,
     channel: MemoryChannel,
@@ -2080,6 +2110,43 @@ def test_clarification_writes_clarification_sent_event(
     events = _read_trace_events(trace_dir)
     payload = next(e["payload"] for e in events if e["event"] == "clarification_sent")
     assert payload["frage"] == "Welches Projekt meinst du?"  # type: ignore[index]
+
+
+def test_gated_gap_check_writes_routing_event(
+    channel: MemoryChannel, repo: Repository, settings: Settings, log_dir: Path, tmp_path: Path
+) -> None:
+    """Gap-Check-Gating (Schritt 8.23): übersprungener zweiter Durchgang landet als
+    ``routing``-Ereignis im Trace (sichtbar in ``scripts/show_trace.py``)."""
+    from kollege.models import ExtractedCompletion
+    from kollege.trace import JsonlTraceWriter
+
+    trace_dir = tmp_path / "traces"
+    writer = JsonlTraceWriter(trace_dir)
+    orchestrator = Orchestrator(
+        channel=channel,
+        repo=repo,
+        transcriber=None,
+        settings=settings,
+        log_dir=log_dir,
+        trace=writer,
+    )
+    first = ExtractionResult(
+        completed=[ExtractedCompletion(task_id=1, task_title="Zaun streichen")]
+    )
+    with (
+        patch("kollege.orchestrator.run_extraction", return_value=first),
+        patch("kollege.orchestrator.run_gap_check") as gap,
+    ):
+        orchestrator.handle_message(IncomingMessage(sender=SENDER, text="Zaun ist fertig."))
+    gap.assert_not_called()
+
+    events = _read_trace_events(trace_dir)
+    entscheidungen = [
+        e["payload"]["entscheidung"]  # type: ignore[index]
+        for e in events
+        if e["event"] == "routing"
+    ]
+    assert any("gap_check" in str(e) for e in entscheidungen)
 
 
 def test_error_during_extraction_writes_error_event(

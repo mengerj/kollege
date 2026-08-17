@@ -10,8 +10,12 @@ from pydantic import ValidationError
 from kollege.models import (
     Contact,
     ContactType,
+    ExtractedCompletion,
+    ExtractedContact,
     ExtractedOrt,
+    ExtractedProjectUpdate,
     ExtractedTask,
+    ExtractedTaskEdit,
     ExtractionResult,
     Ort,
     Project,
@@ -110,3 +114,44 @@ def test_contact_and_project_default_ort_id_none() -> None:
 
 def test_extraction_result_locations_counts_toward_is_empty() -> None:
     assert ExtractionResult(locations=[ExtractedOrt(name="Flurstück 12")]).is_empty() is False
+
+
+# ---------------------------------------------------------------------------
+# has_gap_check_candidates (Schritt 8.23 — Gap-Check-Gating)
+# ---------------------------------------------------------------------------
+
+
+def test_has_gap_check_candidates_false_when_completely_empty() -> None:
+    assert ExtractionResult().has_gap_check_candidates() is False
+
+
+def test_has_gap_check_candidates_false_for_pure_completion_note() -> None:
+    """Eine reine Erledigungs-Notiz (nur completed) hat für den Gap-Check nichts zu
+    prüfen (Live-Trace 2026-07-03, siehe ROADMAP.md Schritt 8.23)."""
+    result = ExtractionResult(
+        completed=[
+            ExtractedCompletion(task_id=1, task_title="Zaun streichen"),
+            ExtractedCompletion(task_id=2, task_title="Angebot senden"),
+        ]
+    )
+    assert result.has_gap_check_candidates() is False
+
+
+def test_has_gap_check_candidates_false_for_pure_edit_note() -> None:
+    result = ExtractionResult(
+        edits=[ExtractedTaskEdit(task_id=1, task_title="Zaun streichen", new_due=date(2026, 7, 20))]
+    )
+    assert result.has_gap_check_candidates() is False
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        ExtractionResult(contacts=[ExtractedContact(name="Müller")]),
+        ExtractionResult(tasks=[ExtractedTask(title="Angebot schicken")]),
+        ExtractionResult(project_updates=[ExtractedProjectUpdate(project="Stadtpark")]),
+        ExtractionResult(locations=[ExtractedOrt(name="Flurstück 12")]),
+    ],
+)
+def test_has_gap_check_candidates_true_for_core_categories(result: ExtractionResult) -> None:
+    assert result.has_gap_check_candidates() is True

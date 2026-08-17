@@ -558,7 +558,9 @@ def _format_edit_changes(ed: ExtractedTaskEdit) -> str:
     return ", ".join(parts) if parts else "(keine Änderung)"
 
 
-def _format_result_for_prompt(result: ExtractionResult, *, mark_gaps: bool = False) -> str:
+def _format_result_for_prompt(
+    result: ExtractionResult, *, mark_gaps: bool = False, compact_task_refs: bool = False
+) -> str:
     """Aktuelles ExtractionResult als lesbaren Text für Prompt-Läufe (Schritt 8.20).
 
     Eine gemeinsame Quelle der Wahrheit für den Revisions-Prompt (``run_revision``,
@@ -572,6 +574,12 @@ def _format_result_for_prompt(result: ExtractionResult, *, mark_gaps: bool = Fal
     ``mark_gaps=True`` (Lücken-Prüfung): markiert fehlende Fälligkeit/Projekt-/
     Kontaktzuordnung **explizit** (»OHNE Fälligkeitsdatum«), damit der zweite
     Durchgang Lücken direkt sieht. ``mark_gaps=False`` (Korrektur-Lauf): kompakte Form.
+
+    ``compact_task_refs=True`` (Schritt 8.23): Erledigungen/Änderungen nur mit
+    ``task_id`` statt vollem ``task_title`` referenzieren — der Titel steht bereits
+    im ``[OFFENE AUFGABEN]``-Kontextblock, den der Aufrufer garantiert mitschickt
+    (nur gesetzt, wenn dieser Block tatsächlich Teil des Prompts ist). Spart Tokens
+    ohne Informationsverlust.
     """
     lines: list[str] = []
     for c in result.contacts:
@@ -591,10 +599,12 @@ def _format_result_for_prompt(result: ExtractionResult, *, mark_gaps: bool = Fal
         label = "Projekt-Update" if mark_gaps else "Projekt"
         lines.append(f"  - {label}: {pu.project}{status}")
     for comp in result.completed:
-        lines.append(f"  - Erledigung: #{comp.task_id} {comp.task_title}")
+        ref = f"#{comp.task_id}" if compact_task_refs else f"#{comp.task_id} {comp.task_title}"
+        lines.append(f"  - Erledigung: {ref}")
     for ed in result.edits:
         changes = _format_edit_changes(ed)
-        lines.append(f"  - Aufgabe ändern: #{ed.task_id} {ed.task_title} — {changes}")
+        ref = f"#{ed.task_id}" if compact_task_refs else f"#{ed.task_id} {ed.task_title}"
+        lines.append(f"  - Aufgabe ändern: {ref} — {changes}")
     for loc in result.locations:
         details = [d for d in (loc.adresse, loc.flurnummer) if d]
         detail = f" ({', '.join(details)})" if details else ""
@@ -708,7 +718,9 @@ def run_gap_check(
     zusammengesetzten Prompt aufgerufen, sodass Primär-/Fallback-Pfad und
     Namensabgleich unverändert wiederverwendet werden.
     """
-    first_formatted = _format_result_for_prompt(first_result, mark_gaps=True)
+    first_formatted = _format_result_for_prompt(
+        first_result, mark_gaps=True, compact_task_refs=bool(open_tasks_context)
+    )
     gap_prompt = (
         "[LÜCKEN-PRÜFUNG — ZWEITER DURCHGANG]\n"
         f"Ursprüngliches Transkript:\n{original_transcript}\n\n"
@@ -801,10 +813,24 @@ def run_clarification_response(
     )
 
 
+_USER_PROMPT_DEDUP_MARKER = "[siehe llm_run_start.prompt — identisch, hier nicht dupliziert]"
+
+
 def _serialize_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
     """Alle Messages eines Laufs (System-Prompts, Tool-Calls, Retries, Antwort)
-    JSON-serialisierbar machen, für das Trace-Ereignis eines LLM-Laufs."""
+    JSON-serialisierbar machen, für das Trace-Ereignis eines LLM-Laufs.
+
+    Die ``user-prompt``-Part der ersten Anfrage ist Byte-für-Byte identisch mit
+    dem bereits im ``llm_run_start``-Ereignis desselben Laufs gespeicherten
+    ``prompt`` — wird hier durch einen Verweis ersetzt statt erneut abgelegt
+    (Schritt 8.23: Trace-Dateien wuchsen sonst mit doppeltem Prompt-Text, ohne
+    dass das ein zusätzliches LLM-Token kostet, aber Disk-Platz verschwendet).
+    """
     dumped: list[dict[str, Any]] = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    for msg in dumped:
+        for part in msg.get("parts", []):
+            if part.get("part_kind") == "user-prompt":
+                part["content"] = _USER_PROMPT_DEDUP_MARKER
     return dumped
 
 

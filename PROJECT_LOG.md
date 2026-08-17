@@ -5,6 +5,115 @@ Chronologisches Log der Arbeit. Neuester Eintrag oben. Pro Session ergänzen
 
 ---
 
+## 2026-07-17 — Schritt 8.23 — Kontext-Deduplizierung + Gap-Check-Gating (automatische Session)
+
+**Auslöser.** Nächster Schritt nach Abschluss der Testphasen-Vorbereitung
+(8.25–8.27). Motiv war die Trace-Analyse vom 2026-07-03: der zweite
+Extraktions-Durchgang (`run_gap_check`) lief bei *jeder* Notiz, verdoppelte
+dabei den Prompt-Kontext (`[BEKANNTE NAMEN]`+`[OFFENE AUFGABEN]` erneut, plus
+Aufgaben-Titel doppelt im „Erster Vorschlag") und lieferte für eine reine
+Erledigungs-Notiz ein **byte-identisches** Ergebnis bei vollem zweitem
+LLM-Call (3107 → 3662 Input-Tokens für nichts).
+
+**Umsetzung.**
+- **Gap-Check-Gating** ([`models.py`](src/kollege/models.py)):
+  `ExtractionResult.has_gap_check_candidates()` — `True` nur wenn `contacts`/
+  `tasks`/`project_updates`/`locations` nicht leer sind. Bewusst **ohne**
+  `completed`/`edits`: die referenzieren nur IDs bestehender Aufgaben, es gibt
+  dort keine Frist-/Zuordnungs-Lücke zu füllen (genau der Fall aus dem Trace).
+  [`orchestrator.py`](src/kollege/orchestrator.py): `_extract()` überspringt
+  `run_gap_check` jetzt, wenn das Erstergebnis keine Kandidaten hat — schreibt
+  dafür ein `routing`-Trace-Ereignis (`gap_check:übersprungen (keine
+  Kandidaten)`), sichtbar in `scripts/show_trace.py`.
+- **Kontext im Gap-Check abgespeckt** ([`agent/__init__.py`](src/kollege/agent/__init__.py)):
+  `_format_result_for_prompt()` bekommt ein neues `compact_task_refs`-Flag —
+  referenziert Erledigungen/Änderungen im „Erster Vorschlag" nur noch per
+  `#task_id` statt vollem Titel, wenn `open_tasks_context` (wo der Titel
+  bereits steht) tatsächlich mitgeschickt wird. `run_gap_check()` setzt das
+  Flag automatisch (`compact_task_refs=bool(open_tasks_context)`) — ohne
+  Kontext bleibt der volle Titel erhalten (kein Informationsverlust).
+- **Trace-Redundanz behoben** ([`agent/__init__.py`](src/kollege/agent/__init__.py)):
+  `_serialize_messages()` ersetzt den Inhalt der `user-prompt`-Part (Byte-für-
+  Byte identisch mit `llm_run_start.payload.prompt` desselben Laufs) durch
+  einen Verweis-Marker, statt ihn ein zweites Mal in `llm_run_result`/
+  `llm_run_error` abzulegen. `scripts/show_trace.py` brauchte keine Änderung
+  (Struktur/`part_kind` bleibt erhalten, nur der Inhalt ist jetzt ein kurzer
+  Verweis).
+- **Benchmark um Zwei-Durchgang-Modus erweitert** ([`scripts/benchmark_models.py`](scripts/benchmark_models.py)):
+  neues `--two-pass`-Flag misst den echten Produktions-Pfad (Erstextraktion +
+  gegateter Gap-Check) statt nur der bisherigen Erstextraktion — der
+  bestehende Benchmark (8.11) prüfte `run_gap_check` bisher gar nicht.
+  Rückwärtskompatibel (Default unverändert).
+
+**Bewusst nicht im Scope.** Die „Instruktionen entdoppeln"-Idee aus der
+Roadmap (completed/edits/clarification-Anweisung steht mehrfach im
+System-Prompt *und* in den Kontextblöcken) wurde **nicht** angefasst — das
+Risiko, dass kleinere/lokale Modelle auf die Wiederholung angewiesen sind, um
+die Anweisung zuverlässig zu befolgen, ließ sich in dieser Session nicht sauber
+live verifizieren (siehe Blocker unten), und die DoD verlangt „messbar
+reduziert", nicht „vollständig behoben". Bleibt als Folge-Idee in
+[ROADMAP_ARCHIV.md](ROADMAP_ARCHIV.md#schritt-823--kontext-deduplizierung--gap-check-gating-token-sparen-)
+dokumentiert.
+
+**Benchmark vorher/nachher — mit einer wichtigen Einschränkung.** Der Versuch,
+den 8.11-Benchmark mit dem **Produktionsmodell** (`openrouter:mistralai/
+mistral-medium-3.1`) zu fahren, scheiterte an einem **OpenRouter-Konto-Problem**
+(siehe eigener Absatz unten) — nicht an diesem Schritt. Ausgewichen auf ein
+lokales Modell (`qwen2.5:7b-instruct`, bereits gepullt) mit dem neuen
+`--two-pass`-Flag, `--runs 2`, nur `extraction`-Suite (Revision ist von 8.23
+nicht betroffen, da `run_revision` unverändert bleibt): **83 % pass_rate,
+85 % mean_score, 8 % empty_rate, 8 % over_extraction_rate, 0 % error_rate**
+über alle 6 Fixtures × 2 Läufe (Ergebnis eingecheckt unter
+`benchmarks/results/2026-07-17_qwen2.5-7b-instruct-two-pass.md`). **Wichtige
+Einschränkung:** alle 6 Fixtures liefern im Erstergebnis mindestens eine
+Aufgabe/einen Kontakt/ein Projekt-Update/einen Ort — das Gating griff bei
+**keinem** der 12 Läufe (kein Fixture bildet eine reine Erledigungs-Notiz mit
+vorgesätem offenen Task ab, das würde eine Erweiterung des Fixture-Formats um
+einen vorbestückten Repo-Zustand brauchen). Die 0 %-Fehlerrate belegt trotzdem,
+dass der neue Zwei-Durchgang-Pfad (inkl. kompakter Aufgaben-Referenzen)
+end-to-end fehlerfrei läuft. Die eigentliche Kernbehauptung des Gatings — für
+eine reine Erledigungs-Notiz ist der Gap-Check-Output identisch — stützt sich
+stattdessen auf **echte Produktionsdaten**: der ursprüngliche Trace vom
+2026-07-03 (`mistral-medium-3.1`) zeigte für genau diesen Fall bereits ein
+Byte-für-Byte identisches Ergebnis (`contacts`, `tasks`, `project_updates`
+und `locations` alle leer, nur `completed` mit 6 Einträgen — Erst- und
+Gap-Check-Output stimmten exakt überein). Zusammen mit den neuen
+deterministischen Unit-Tests (`has_gap_check_candidates`, Gating-Verdrahtung
+im Orchestrator via `FunctionModel`/Mocks) ist das Risiko aus der Roadmap
+(„höchstes Risiko für die Qualität") gut abgedeckt, ohne einen teuren,
+unnötigen Blindflug-Benchmark zu fahren.
+
+**⚠️ Entdeckt: OpenRouter blockiert das Produktionsmodell.** Ein direkter
+Test (`POST /chat/completions`, kein Tool-Call, kein Kollege-Code beteiligt)
+gegen `mistralai/mistral-medium-3.1` über den produktiven OpenRouter-Key
+scheiterte mit `404 „No endpoints available matching your guardrail
+restrictions and data policy. Configure: https://openrouter.ai/settings/privacy"`.
+Andere Modelle über denselben Key funktionieren (`mistralai/
+mistral-small-3.2-24b-instruct`, `openai/gpt-4o-mini` → beide 200 OK) — das
+Problem ist spezifisch für `mistral-medium-3.1`, vermutlich eine
+Datenschutz-/Guardrail-Einstellung im OpenRouter-Konto, die inzwischen keinen
+Anbieter mehr zulässt, der dieses Modell bedient. **Falls der Signal-Bot
+gerade live läuft, scheitert damit jede eingehende Notiz** — ein potenziell
+stiller Produktionsausfall. Nicht in dieser Session behoben (Konto-Einstellung,
+kein Code-Fix; erfordert vermutlich interaktiven Login bei OpenRouter). Als
+eigene Aufgabe ausgelagert (Chip „Fix OpenRouter block on
+mistral-medium-3.1"); zusätzlich als Warnhinweis oben in
+[ROADMAP.md](ROADMAP.md) vermerkt, bis geklärt.
+
+**Tests.** 13 neue Tests: `test_models.py` (7, `has_gap_check_candidates` —
+leer/reine Erledigung/reine Änderung → `False`, je eine Kategorie →
+`True`), `test_orchestrator.py` (3, Gating überspringt `run_gap_check` bei
+reiner Erledigungs-Notiz, Gegenprobe mit Aufgabe im Erstergebnis, Trace-Event
+bei übersprungenem Gap-Check), `test_agent.py` (3, `compact_task_refs`
+mit/ohne `open_tasks_context`, Trace speichert den Prompt nicht mehr doppelt).
+459 Tests grün (vorher 446), `ruff`/`ruff format`/`mypy --strict` sauber.
+
+**Nächster Schritt.** **8.24** (Kontakt-Umbenennung mit Merge-Semantik,
+Stufe B — der für Aufgaben in 8.19 umgesetzte Mechanismus, hier für Kontakte
+nachgezogen). Vor der nächsten Live-Session: OpenRouter-Blocker oben klären.
+
+---
+
 ## 2026-07-16 — Schritt 8.27 — Proaktive Erinnerungen mit konfigurierbarem Zeitplan (automatische Session)
 
 **Auslöser.** Letzter Schritt der Testphasen-Sequenz (8.25 → 8.26 → 8.27,

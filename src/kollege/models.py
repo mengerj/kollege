@@ -169,6 +169,21 @@ class ExtractionResult(BaseModel):
             or self.locations
         )
 
+    def has_gap_check_candidates(self) -> bool:
+        """Ob eine Lücken-Prüfung (Schritt 8.18/8.23) für dieses Ergebnis lohnt.
+
+        Der Gap-Check ergänzt fehlende Fristen/Projekt-/Kontaktzuordnungen bei
+        **Aufgaben** und trägt übersehene Kontakte/Aufgaben/Projekt-Updates/
+        Örtlichkeiten nach — das setzt mindestens eine dieser vier Kategorien im
+        Erstergebnis voraus. Bewusst **ohne** ``completed``/``edits``: die
+        referenzieren nur IDs bestehender Aufgaben, es gibt dort keine Frist-/
+        Zuordnungs-Lücke zu füllen. Ein Live-Trace (2026-07-03) zeigte für eine
+        reine Erledigungs-Notiz (nur ``completed`` gesetzt) ein byte-identisches
+        Gap-Check-Ergebnis bei vollem zweiten LLM-Call — genau der Fall, den
+        diese Methode herausfiltert (Schritt 8.23).
+        """
+        return bool(self.contacts or self.tasks or self.project_updates or self.locations)
+
 
 # --------------------------------------------------------------------------- #
 # Domänen-Entitäten (persistiert)                                             #
