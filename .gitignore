@@ -39,3 +39,5 @@ benchmarks/results/*.json
 .DS_Store
 .idea/
 .vscode/
+
+signal-link-qr.png
