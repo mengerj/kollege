@@ -9,5 +9,7 @@ services:
     volumes:
       # Signal-CLI-Konfiguration (Schlüssel, Registrierung) wird hier dauerhaft gespeichert.
       # Sicherung dieses Verzeichnisses = Sicherung der Signal-Identität.
-      - ./signal-cli-config:/home/.local/share/signal-cli
+      # Pfad relativ zu dieser Datei; das Verzeichnis liegt bewusst in der
+      # Repo-Wurzel, damit der version0-Branch denselben Signal-Schlüssel nutzt.
+      - ../../signal-cli-config:/home/.local/share/signal-cli
     restart: unless-stopped

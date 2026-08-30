@@ -9,6 +9,26 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "kollege",
+]
+
+[manifest.dependency-groups]
+dev = [
+    { name = "kollege", editable = "apps/agent_client" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pre-commit", specifier = ">=3.8" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=5.0" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+signal = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "websockets", specifier = ">=13.0" },
+]
+transcription = [{ name = "faster-whisper", specifier = ">=1.0" }]
+
 [[package]]
 name = "aiofile"
 version = "3.11.1"
@@ -1070,27 +1090,11 @@ wheels = [
 [[package]]
 name = "kollege"
 version = "0.0.1"
-source = { editable = "." }
+source = { editable = "apps/agent_client" }
 dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pydantic-settings" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-signal = [
-    { name = "httpx" },
-    { name = "websockets" },
-]
-transcription = [
-    { name = "faster-whisper" },
 ]
 
 [package.metadata]
@@ -1099,20 +1103,6 @@ requires-dist = [
     { name = "pydantic-ai", specifier = ">=0.0.1" },
     { name = "pydantic-settings", specifier = ">=2.5" },
 ]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pre-commit", specifier = ">=3.8" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-cov", specifier = ">=5.0" },
-    { name = "ruff", specifier = ">=0.6" },
-]
-signal = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "websockets", specifier = ">=13.0" },
-]
-transcription = [{ name = "faster-whisper", specifier = ">=1.0" }]
 
 [[package]]
 name = "librt"

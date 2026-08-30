@@ -1,0 +1,23 @@
+# Der Agent-Client — bislang das ganze Projekt, jetzt eine App im Monorepo.
+# Werkzeug-Konfiguration (ruff/mypy/pytest) liegt bewusst in der Workspace-Wurzel
+# (../../pyproject.toml), damit alle Kommandos weiterhin von dort laufen.
+[project]
+name = "kollege"
+version = "0.0.1"
+description = "Persönlicher KI-Projektassistent: passive Erfassung via Sprache/E-Mail, lokal-first, Human-in-the-loop."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Jonatan Menger", email = "jonatan.menger@gmail.com" }]
+dependencies = [
+    "pydantic>=2.9",
+    "pydantic-ai>=0.0.1",
+    "pydantic-settings>=2.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kollege"]

@@ -9,7 +9,7 @@ Modellwahl (Ollama vs. API) durch eine messbare Grundlage.
 Auslöser war ein Live-Vorfall am 2026-07-01: eine triviale Rechtschreibkorrektur
 („Es heißt Aibling, nicht Eibling") auf einen offenen Vorschlag lief ins Leere
 („nichts erkannt"). Die Ursachenanalyse (siehe
-[ROADMAP.md](../ROADMAP.md#schritt-811--modell-benchmark-system-extraktion--revision))
+[ROADMAP.md](../../../docs/archiv/ROADMAP.md#schritt-811--modell-benchmark-system-extraktion--revision))
 ergab: Das Modell *versteht* die Korrektur, scheitert aber **nicht-deterministisch**
 am strukturierten Output — bei zwei verschiedenen lokalen Modellen reproduzierbar.
 
@@ -162,20 +162,20 @@ Zwei Hebel, um das Ganze schlank zu halten:
 
 ```bash
 # Beide Suiten, Standard-Modelle des Live-Vorfalls, 5 Wiederholungen:
-uv run python scripts/benchmark_models.py \
+uv run python apps/agent_client/scripts/benchmark_models.py \
   --models ornith:9b,qwen2.5:7b-instruct \
   --runs 5
 
 # Nur Revision, nur ein Modell, weniger Wiederholungen (schneller):
-uv run python scripts/benchmark_models.py \
+uv run python apps/agent_client/scripts/benchmark_models.py \
   --models qwen2.5:7b-instruct --suite revision --runs 3
 
 # Lokal gegen ein API-Modell vergleichen:
-uv run python scripts/benchmark_models.py \
+uv run python apps/agent_client/scripts/benchmark_models.py \
   --models ornith:9b,anthropic:claude-sonnet-4-6 --runs 5
 
 # OpenRouter-Modelle parallelisieren (netzwerkgebunden, kein GPU-Engpass):
-uv run python scripts/benchmark_models.py \
+uv run python apps/agent_client/scripts/benchmark_models.py \
   --models openrouter:mistralai/mistral-large,openrouter:qwen/qwen-2.5-7b-instruct \
   --runs 5 --concurrency 5
 
@@ -239,6 +239,6 @@ nicht persistiert; falls das später gebraucht wird (Backlog), gehört das nach
 - Semantische Ähnlichkeit statt Keyword-Match.
 - Whisper-Transkriptions-Benchmark (nur Text-Fixtures, Audio-Pfad separat).
 
-Siehe auch: [Schritt 8.12](../ROADMAP.md#schritt-812--dsgvo-konforme-eu-llm-anbieter-evaluieren--anbinden)
+Siehe auch: [Schritt 8.12](../../../docs/archiv/ROADMAP.md#schritt-812--dsgvo-konforme-eu-llm-anbieter-evaluieren--anbinden)
 nutzt diesen Benchmark als Auswahl-Werkzeug für einen DSGVO-konformen
 Produktions-Anbieter.
