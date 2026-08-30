@@ -17,7 +17,7 @@ Signal-Konto angemeldet — kein neues Konto, kein Business-API nötig.
 ## 1. Container starten
 
 ```bash
-docker compose up -d
+docker compose -f apps/agent_client/docker-compose.yml up -d
 ```
 
 Überprüfe, ob der Container läuft:
@@ -32,7 +32,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/v1/health
 > bewusst nichts an. Das ist korrekt, kein Fehler. Mit dem `-w '%{http_code}'`
 > oben siehst du den Statuscode.
 >
-> Direkt nach `docker compose up -d` braucht der Container ein paar Sekunden
+> Direkt nach `docker compose -f apps/agent_client/docker-compose.yml up -d` braucht der Container ein paar Sekunden
 > (`STATUS: health: starting`). Erst danach antwortet `/v1/health` mit 204.
 
 Optional — Modus und Version prüfen (`mode` muss `json-rpc` sein):
@@ -133,7 +133,7 @@ Voraussetzungen (einmal prüfen):
 Dann den Live-Listener starten:
 
 ```bash
-uv run python scripts/run_signal.py
+uv run python apps/agent_client/scripts/run_signal.py
 ```
 
 Das Skript prüft Health, Verknüpfung und Konfiguration vorab und meldet klar,
@@ -146,7 +146,7 @@ falls etwas fehlt. Bei Erfolg:
 Beenden mit **Strg-C**. Im Hintergrund (Logs in Datei):
 
 ```bash
-nohup uv run python scripts/run_signal.py > kollege.log 2>&1 &
+nohup uv run python apps/agent_client/scripts/run_signal.py > kollege.log 2>&1 &
 tail -f kollege.log
 ```
 
@@ -186,7 +186,7 @@ rohen WebSocket-Pakete mit (Bot vorher stoppen, damit sich nicht zwei Empfänger
 die Nachrichten teilen):
 
 ```bash
-uv run python scripts/signal_debug_receive.py 30   # lauscht 30 s
+uv run python apps/agent_client/scripts/signal_debug_receive.py 30   # lauscht 30 s
 ```
 
 ---
@@ -204,8 +204,8 @@ uv run python scripts/signal_debug_receive.py 30   # lauscht 30 s
 
 | Aktion | Befehl |
 |---|---|
-| Starten | `docker compose up -d` |
-| Stoppen | `docker compose down` |
-| Logs | `docker compose logs -f` |
-| Neustart | `docker compose restart signal-cli-rest-api` |
-| Logs (Container) | `docker compose logs signal-cli-rest-api` |
+| Starten | `docker compose -f apps/agent_client/docker-compose.yml up -d` |
+| Stoppen | `docker compose -f apps/agent_client/docker-compose.yml down` |
+| Logs | `docker compose -f apps/agent_client/docker-compose.yml logs -f` |
+| Neustart | `docker compose -f apps/agent_client/docker-compose.yml restart signal-cli-rest-api` |
+| Logs (Container) | `docker compose -f apps/agent_client/docker-compose.yml logs signal-cli-rest-api` |

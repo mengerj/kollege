@@ -1,0 +1,37 @@
+# Lokale Entwicklungs-Datenbank.
+#
+# Start (aus dem Repo-Wurzelverzeichnis):
+#   docker compose -f apps/db/docker-compose.yml up -d
+#
+# Die Zugangsdaten stehen hier bewusst im Klartext: das ist eine wegwerfbare
+# Datenbank auf deinem Laptop, erreichbar nur über localhost. Sobald echte
+# Kundendaten im Spiel sind, gehören Passwörter in .env und diese Datei
+# bekommt eine ${VARIABLE}-Interpolation.
+services:
+  postgres:
+    image: postgres:18
+    container_name: kollege-postgres
+    environment:
+      POSTGRES_USER: kollege
+      POSTGRES_PASSWORD: kollege
+      POSTGRES_DB: kollege
+      # Deutsche Sortierung/Umlaute — sonst sortiert "Ö" hinter "Z".
+      LANG: de_DE.utf8
+    ports:
+      # Host-Port 5432. Läuft lokal schon ein Postgres, hier z. B. auf
+      # "5433:5432" ändern statt den anderen Dienst zu beenden.
+      - "5432:5432"
+    volumes:
+      # Benanntes Volume: überlebt `docker compose down`, stirbt erst bei
+      # `docker compose down -v`. Genau dieser Unterschied wird dich einmal
+      # Daten kosten — dann weißt du, warum er hier steht.
+      - kollege-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kollege -d kollege"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  kollege-pgdata:

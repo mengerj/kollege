@@ -7,7 +7,7 @@
 > bis Phase 1 (Sprachnotiz-Kern) rund läuft. Erst danach geht es mit
 > **Schritt 9 (IMAP)** weiter.
 >
-> Lies zuerst [CLAUDE.md](../CLAUDE.md) (Designprinzipien) und
+> Lies zuerst [CLAUDE.md](../../../CLAUDE.md) (Designprinzipien) und
 > [docs/signal-setup.md](signal-setup.md) (Setup/Verknüpfung). Dieses Dokument
 > ist die Brücke vom „läuft technisch" zum „läuft im Alltag".
 
@@ -37,7 +37,7 @@ Drei Verantwortlichkeiten (siehe CLAUDE.md): **Ohr** (`channels/`), **Gehirn**
 
 ```bash
 # 1. Docker-Container (Signal-Bridge)
-docker compose up -d
+docker compose -f apps/agent_client/docker-compose.yml up -d
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/v1/health   # erwartet: 204
 curl -s http://localhost:8080/v1/accounts                                   # erwartet: ["+49…"]
 
@@ -45,7 +45,7 @@ curl -s http://localhost:8080/v1/accounts                                   # er
 curl -s http://localhost:11434/api/tags | python3 -m json.tool | grep name  # qwen2.5:7b-instruct?
 
 # 3. Bot starten — IMMER unbuffered, sonst sieht man nichts im Log
-PYTHONUNBUFFERED=1 uv run python -u scripts/run_signal.py
+PYTHONUNBUFFERED=1 uv run python -u apps/agent_client/scripts/run_signal.py
 ```
 
 `scripts/run_signal.py` prüft Health, Verknüpfung und Config vorab und bricht mit
@@ -55,7 +55,7 @@ klarer Meldung ab, wenn etwas fehlt. „✓ Bereit. Lausche …" = es läuft.
 beobachten, ohne die Konsole zu blockieren):
 
 ```bash
-PYTHONUNBUFFERED=1 nohup uv run python -u scripts/run_signal.py > kollege.log 2>&1 &
+PYTHONUNBUFFERED=1 nohup uv run python -u apps/agent_client/scripts/run_signal.py > kollege.log 2>&1 &
 tail -f kollege.log
 ```
 
@@ -83,7 +83,7 @@ Zum Mitschneiden der rohen WebSocket-Pakete:
 ```bash
 # Bot vorher stoppen, sonst teilen sich zwei Empfänger die Nachrichten!
 pkill -f run_signal.py
-uv run python scripts/signal_debug_receive.py 30   # lauscht 30 s, gibt jedes Paket aus
+uv run python apps/agent_client/scripts/signal_debug_receive.py 30   # lauscht 30 s, gibt jedes Paket aus
 ```
 
 Damit sieht man die **Envelope-Struktur** (entscheidend, siehe §5) und ob eine
@@ -111,7 +111,7 @@ wurde.
 ### d) Container-Sicht
 
 ```bash
-docker compose logs -f signal-cli-rest-api
+docker compose -f apps/agent_client/docker-compose.yml logs -f signal-cli-rest-api
 ```
 
 Ein gesundes Empfangsmuster ist **eine** lang offene `GET /v1/receive/…`-Zeile.
@@ -143,10 +143,10 @@ alle zugehörigen Ereignisse.
 **Anschauen:**
 
 ```bash
-uv run python scripts/show_trace.py                  # heute, alle Läufe
-uv run python scripts/show_trace.py --last 3          # nur die letzten 3 Läufe
-uv run python scripts/show_trace.py --run <run_id>    # ein Lauf komplett
-uv run python scripts/show_trace.py --full            # Prompts/Inhalte ungekürzt
+uv run python apps/agent_client/scripts/show_trace.py                  # heute, alle Läufe
+uv run python apps/agent_client/scripts/show_trace.py --last 3          # nur die letzten 3 Läufe
+uv run python apps/agent_client/scripts/show_trace.py --run <run_id>    # ein Lauf komplett
+uv run python apps/agent_client/scripts/show_trace.py --full            # Prompts/Inhalte ungekürzt
 ```
 
 **Löschen** (Volltext, nach der Debugging-Phase wieder deaktivieren):
@@ -318,7 +318,7 @@ wieder auftauchen werden:
   Code**. LLM-Aufrufe nicht im CI — `TestModel`/`FunctionModel` nutzen.
 - Den Bot nach Code-Änderungen **neu starten** (er lädt Module beim Start; ein
   laufender Prozess sieht Änderungen nicht).
-- Relevante Erkenntnisse hier (§5/§6) und im [PROJECT_LOG.md](../PROJECT_LOG.md)
+- Relevante Erkenntnisse hier (§5/§6) und im [PROJECT_LOG.md](../../../docs/archiv/PROJECT_LOG.md)
   ergänzen.
 
 ---
@@ -332,4 +332,4 @@ wieder auftauchen werden:
 - [ ] Sprachnachricht wird korrekt transkribiert und verarbeitet.
 - [ ] Datumsauflösung stimmt über mehrere Formulierungen.
 
-Erst wenn das steht: weiter mit **Schritt 9 (IMAP)** laut [ROADMAP.md](../ROADMAP.md).
+Erst wenn das steht: weiter mit **Schritt 9 (IMAP)** laut [ROADMAP.md](../../../docs/archiv/ROADMAP.md).

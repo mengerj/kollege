@@ -5,7 +5,7 @@
   launchd User Agent — Kollege Signal-Bot (macOS)
 
   Installation (einmalig):
-    cp deploy/de.mengerj.kollege.plist ~/Library/LaunchAgents/
+    cp apps/agent_client/deploy/de.mengerj.kollege.plist ~/Library/LaunchAgents/
     launchctl load ~/Library/LaunchAgents/de.mengerj.kollege.plist
 
   Starten / Stoppen:
@@ -37,7 +37,7 @@
         <string>/Users/mengerj/.local/bin/uv</string>
         <string>run</string>
         <string>python</string>
-        <string>scripts/run_signal.py</string>
+        <string>apps/agent_client/scripts/run_signal.py</string>
     </array>
 
     <key>WorkingDirectory</key>
