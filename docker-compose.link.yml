@@ -1,0 +1,23 @@
+# Zusatz-Konfiguration NUR zum Verknüpfen des Linked Device (QR-Scan).
+#
+# Wird bewusst NICHT automatisch geladen — dafür müsste die Datei
+# "docker-compose.override.yml" heißen, und dann liefe auch der Live-Betrieb
+# versehentlich in MODE=native. Zum Verknüpfen explizit dazuschalten:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.link.yml up -d
+#
+# Nach erfolgreichem Verknüpfen wieder normal starten:
+#
+#   docker compose up -d
+#
+# Grund: In MODE=json-rpc hält signal-cli-rest-api die Link-Session nicht offen
+# (startLink liefert die URI, finishLink wartet nie auf das Telefon) — das
+# Telefon zeigt beim Scannen „Netzwerkfehler", serverseitig bleibt das Log leer.
+# In MODE=native startet ein echter `signal-cli link`-Subprozess, der den
+# Handshake abschließt. Der Bot (SignalChannel) braucht danach wieder json-rpc
+# für das WebSocket-Streaming — deshalb ist das hier ein Zwischenschritt und
+# kein Dauerzustand.
+services:
+  signal-cli-rest-api:
+    environment:
+      - MODE=native

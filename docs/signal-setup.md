@@ -49,6 +49,24 @@ curl -s http://localhost:8080/v1/about
 Signal erlaubt mehrere verknüpfte Geräte pro Konto (z. B. Signal Desktop).
 Wir registrieren Kollege als eines dieser Geräte.
 
+> **Für diesen Schritt die Bridge auf `MODE=native` umstellen.** Im
+> Betriebsmodus `json-rpc` hält signal-cli-rest-api die Link-Session nicht
+> offen — `startLink` liefert die URI, `finishLink` wartet nie auf das Telefon.
+> Beim Scannen meldet das Telefon dann „Netzwerkfehler", während das
+> Server-Log leer bleibt. Dafür gibt es `docker-compose.link.yml`:
+>
+> ```bash
+> docker compose -f docker-compose.yml -f docker-compose.link.yml up -d
+> ```
+>
+> Nach erfolgreichem Verknüpfen zurück in den Betriebsmodus — der Bot braucht
+> `json-rpc` für das WebSocket-Streaming:
+>
+> ```bash
+> docker compose up -d
+> ```
+
+
 **QR-Code erzeugen:**
 
 `/v1/qrcodelink` liefert den QR-Code **direkt als PNG-Bild** zurück — kein
